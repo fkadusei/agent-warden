@@ -25,7 +25,7 @@ that checkpoint.
 | **Identity** | Issues a short-lived, task-scoped X.509 credential naming the agent, the principal, and the task. Expires with the task. | W3, W4 |
 | **Policy** | Deny-by-default decision on principal + agent + tool + arguments + taint state → `allow` / `deny` / `require_approval`. | W1, W2, W4 |
 | **Approvals** | Single-use approvals bound to a call digest and a distinct approver. | W6 |
-| **Credential broker** | Injects tool credentials at execution; the agent never holds them. | W3 |
+| **Credential broker** | Injects tool credentials at execution; the agent never holds them. Bindings map a server (or one tool) to an HTTP header or stdio environment variable, read from `WARDEN_SECRET_*` variables or owner-only regular files. A missing secret refuses the call; values print as `[REDACTED]`; `Scrub` removes credentials a tool echoes back (`internal/broker`). | W3 |
 | **Tool registry** | Pins each tool manifest by digest. | W5 |
 | **Output inspector** | Tags results with a taint source; flags instruction-like content. | W1 |
 | **Receipt log** | Write-ahead, signed, hash-chained receipts. | W8, W9, W13, W14 |

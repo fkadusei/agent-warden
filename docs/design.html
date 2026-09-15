@@ -137,7 +137,7 @@
     <tr><td><strong>Identity</strong></td><td>Issues a short-lived, task-scoped X.509 credential naming the agent, the principal, and the task. Expires with the task.</td><td>W3, W4</td></tr>
     <tr><td><strong>Policy</strong></td><td>Deny-by-default decision on principal + agent + tool + arguments + taint state → <code>allow</code> / <code>deny</code> / <code>require_approval</code>.</td><td>W1, W2, W4</td></tr>
     <tr><td><strong>Approvals</strong></td><td>Single-use approvals bound to a call digest and a distinct approver.</td><td>W6</td></tr>
-    <tr><td><strong>Credential broker</strong></td><td>Injects tool credentials at execution; the agent never holds them.</td><td>W3</td></tr>
+    <tr><td><strong>Credential broker</strong></td><td>Injects tool credentials at execution; the agent never holds them. Bindings map a server (or one tool) to an HTTP header or stdio environment variable, read from <code>WARDEN_SECRET_*</code> variables or owner-only regular files. A missing secret refuses the call; values print as <code>[REDACTED]</code>; <code>Scrub</code> removes credentials a tool echoes back (<code>internal/broker</code>). <span class="pill g">passing</span></td><td>W3</td></tr>
     <tr><td><strong>Tool registry</strong></td><td>Pins each tool manifest by digest.</td><td>W5</td></tr>
     <tr><td><strong>Output inspector</strong></td><td>Tags results with a taint source; flags instruction-like content.</td><td>W1</td></tr>
     <tr><td><strong>Receipt log</strong></td><td>Write-ahead, signed, hash-chained receipts.</td><td>W8, W9, W13, W14</td></tr>
