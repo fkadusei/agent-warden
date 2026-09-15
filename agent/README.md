@@ -39,3 +39,20 @@ a file. API keys are read only from environment variables, never from flags.
 
 Model results vary by model and run; they are reported per model and version and are
 never a pass/fail gate. The deterministic gate is `go run ./cmd/warden-gate`.
+
+## Run the whole corpus
+
+`scripts/agent-corpus.sh` starts a temporary Warden (synthetic keys, removed on exit),
+runs every scenario with its own task credential and planted content, stops Warden,
+and verifies the exported receipt log with `warden-verify`. Arguments go to
+`warden-agent run`:
+
+```sh
+scripts/agent-corpus.sh --adapter script
+scripts/agent-corpus.sh --adapter openai-compatible --base-url http://127.0.0.1:11434/v1 --model llama3.2:3b
+```
+
+Every run passes `--check`: the run fails if Warden answered any scenario call the agent
+made differently from the scenario's expectation (and, for `script`, if any step was
+skipped). Transcripts, the receipt log, the anchor, and the public keys are kept in
+`agent-runs/`, which git ignores.

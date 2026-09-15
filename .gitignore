@@ -19,6 +19,9 @@
 # Default `warden init` directory: private keys, receipt store, and secrets
 /warden-local/
 
+# Agent corpus runs (transcripts, receipt logs, public keys)
+/agent-runs/
+
 # Go
 /bin/
 /dist/

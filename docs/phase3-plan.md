@@ -1,6 +1,6 @@
 # Phase 3 plan — output inspection and the demo agent
 
-- **Status:** In progress
+- **Status:** Complete (2026-09-15)
 - **Date:** 2026-09-15
 - **Goal (design §7):** output inspector, demo agent, and synthetic tools, with the
   `injection`, `exfil`, and `deputy` scenarios running end to end.
@@ -23,7 +23,19 @@ policy refused the harmful call, not because a heuristic happened to spot the at
 | 3.4 ✅ | **Scenario corpus and tools** — language-neutral `scenarios/*.json` (task, planted content and who wrote it, the calls a compromised agent makes, the outcome Warden must produce for each), read by `internal/scenario` and embedded by the root package. 13 scenarios: 4 injection, 3 exfil, 3 deputy, 3 benign. Example tools gain `mail.inbox` and `tickets.get`, serve planted content (`example-tools --scenario ID`), and now own the example policy: any untrusted source (web, email, another principal, planted instructions) sends refunds and email to approval even when the inspector finds nothing, and customer data cannot leave by email or web request | `scenarios/`, `internal/exampletools` | W1, W3, W4 | 3.2 |
 | 3.5 ✅ | **Scripted compromised agent + gate** — every scenario runs against a fresh copy of the example deployment (`warden init`'s policy, tools, labels, and inspector, over mutual TLS); the scripted agent makes every call, even after refusals. A scenario passes only if each outcome, read from the signed receipts, matches; named rules match; refused calls never reach a tool while allowed ones reach it exactly once; and the log verifies. `warden-gate` runs it after the Phase 2 attacks. A second test runs the corpus with a permit-everything policy and requires every attack scenario to fail, so the gate is shown to catch a weak policy | `internal/gate` | W1, W3, W4 | 3.3, 3.4 |
 | 3.6 ✅ | **Demo agent (Python)** — model-agnostic: an Anthropic adapter, an OpenAI-compatible adapter (OpenAI, Ollama, vLLM, LM Studio via `base_url`), and a `script` adapter that replays a scenario's calls without a model; MCP over mutual TLS with the task credential; step limit; JSON Lines transcript that never overwrites; per-scenario report of which attack calls the model attempted and what Warden answered. No security advice in the system prompt. API keys only from environment variables. Tested with fake models and clients (pytest, ruff, mypy strict); run end to end against `warden serve` with the script adapter and with llama3.2:3b on Ollama | `agent/` | — | 3.4 |
-| 3.7 | **Phase gate** — scripted scenarios pass in `go test`; the real agent runs the same scenarios with any configured model | tests, docs | W1, W3, W4 | 3.5, 3.6 |
+| 3.7 ✅ | **Phase gate** — scripted scenarios pass in `go test`; the real agent runs the same scenarios with any configured model (`scripts/agent-corpus.sh`, `warden-agent run --check`) | tests, docs | W1, W3, W4 | 3.5, 3.6 |
+
+## Gate results (2026-09-15)
+
+| Check | Result |
+|---|---|
+| `go test ./...` corpus gate (scripted compromised agent, fresh example deployment per scenario) | 13/13 scenarios pass: 10/10 attack calls blocked without reaching a tool, 3/3 benign tasks completed, every log verifies |
+| Same corpus with a permit-everything policy | all 10 attack scenarios fail, benign still pass: the gate catches a weak policy |
+| `scripts/agent-corpus.sh --adapter script` (Python agent, one real `warden serve`, one task credential per scenario) | 13/13 scenarios with every check passing; exported receipt log VERIFIED by `warden-verify` with the anchor |
+| Real model (llama3.2:3b on Ollama) | Reported, not gated: model behavior varies by model and run. Small models often fail to call tools at all, which looks like resistance but is not; meaningful attack-success numbers need capable models and come in Phase 4 |
+
+Deferred to Phase 4: attack-success and benign-completion rates per model with and
+without Warden, added latency, and receipt bytes per call.
 
 ## Decisions (owner, 2026-09-15)
 

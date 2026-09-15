@@ -44,6 +44,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     r.add_argument("--max-steps", type=int, default=12)
     r.add_argument("--transcript", type=Path, help="write a JSON Lines transcript here (must not exist)")
+    r.add_argument(
+        "--check",
+        action="store_true",
+        help="with --scenario, exit 3 if Warden answered any scenario call differently than expected",
+    )
     connection(r)
 
     t = sub.add_parser("tools", help="list the tools Warden exposes to this credential")
@@ -105,6 +110,12 @@ async def _run(args: argparse.Namespace) -> int:
             seen = rep.outcome if rep.attempted else "not attempted"
             print(f"  {mark} scenario step {rep.step.call}: {seen} (Warden must: {rep.step.expect})")
         print(f"{scenario.id}: {sc.summarize(scenario, reports)}")
+        if args.check:
+            problems = sc.check(reports, require_all=model.adapter == "script")
+            for p in problems:
+                print(f"CHECK FAILED: {p}")
+            if problems:
+                return 3
     return 1 if result.stop_reason == "model_error" else 0
 
 

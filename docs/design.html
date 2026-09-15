@@ -320,8 +320,8 @@ agent ◄──result (tagged)───┘</code></pre>
   <tbody>
     <tr><td><strong>0</strong> <span class="pill g">done</span></td><td>This design, the threat model, ADRs 0001–0008</td><td>Owner review</td></tr>
     <tr><td><strong>1</strong> <span class="pill g">done</span></td><td>Receipt library: JCS, composite signer, chain, commitments, checkpoints, <code>warden-verify</code></td><td>Draft test vectors pass; tamper tests fail verification as expected. <strong>Deferred:</strong> RFC 3161 anchoring, key-epoch certificates, key rotation and revocation, approval receipts</td></tr>
-    <tr><td><strong>2</strong></td><td>Gateway: identity, policy, approvals, broker, registry, write-ahead receipts</td><td><code>authz</code>, <code>approval</code>, <code>poison</code>, fail-closed tests pass</td></tr>
-    <tr><td><strong>3</strong></td><td>Output inspector + demo agent + synthetic tools</td><td><code>injection</code>, <code>exfil</code>, <code>deputy</code> scenarios run end to end</td></tr>
+    <tr><td><strong>2</strong> <span class="pill g">done</span></td><td>Gateway: identity, policy, approvals, broker, registry, write-ahead receipts</td><td><code>authz</code>, <code>approval</code>, <code>poison</code>, fail-closed tests pass (<code>warden-gate</code>: 25 attacks refused)</td></tr>
+    <tr><td><strong>3</strong> <span class="pill g">done</span></td><td>Output inspector + demo agent + synthetic tools</td><td><code>injection</code>, <code>exfil</code>, <code>deputy</code> scenarios run end to end (scripted compromised agent: 10/10 attacks blocked, 3/3 benign tasks completed, in <code>go test</code> and through <code>warden serve</code> with the Python agent)</td></tr>
     <tr><td><strong>4</strong></td><td>Benchmark run with/without Warden; checkpoints + anchoring</td><td>Published results table incl. benign completion</td></tr>
     <tr><td><strong>5</strong></td><td>README, demo video, write-up</td><td>—</td></tr>
   </tbody>

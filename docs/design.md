@@ -323,8 +323,8 @@ with the model name and version, because they change with the model.
 |---|---|---|
 | **0** | This design, the threat model, ADRs 0001–0008 | Owner review |
 | **1** ✅ | Receipt library: JCS, composite signer, chain, commitments, checkpoints, `warden-verify` | Draft test vectors pass; tamper tests fail verification as expected. **Deferred:** RFC 3161 anchoring, key-epoch certificates, key rotation and revocation, approval receipts |
-| **2** | Gateway: identity, policy, approvals, broker, registry, write-ahead receipts | `authz`, `approval`, `poison`, fail-closed tests pass |
-| **3** | Output inspector + demo agent + synthetic tools | `injection`, `exfil`, `deputy` scenarios run end to end |
+| **2** ✅ | Gateway: identity, policy, approvals, broker, registry, write-ahead receipts | `authz`, `approval`, `poison`, fail-closed tests pass (`warden-gate`: 25 attacks refused) |
+| **3** ✅ | Output inspector + demo agent + synthetic tools | `injection`, `exfil`, `deputy` scenarios run end to end (scripted compromised agent: 10/10 attacks blocked, 3/3 benign tasks completed, in `go test` and through `warden serve` with the Python agent) |
 | **4** | Benchmark run with/without Warden; checkpoints + anchoring | Published results table incl. benign completion |
 | **5** | README, demo video, write-up | — |
 

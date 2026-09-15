@@ -8,8 +8,10 @@ identifies the caller, checks policy, pauses for human approval when the risk
 warrants it, treats tool output as untrusted, and writes a **signed,
 hash-chained receipt** that anyone holding the public key can verify offline.
 
-> **Status: Phase 2 complete — Warden runs as a real MCP gateway and passes its
-> attack gate.** Full output inspection and the benchmark come next. See the build phases in
+> **Status: Phase 3 complete — Warden runs as a real MCP gateway, inspects tool output,
+> and blocks every injection, exfiltration, and confused-deputy attack in its scenario
+> corpus while benign tasks complete.** The with/without-Warden benchmark across models
+> comes next. See the build phases in
 > [`docs/design.md`](docs/design.md#7-build-phases) and
 > [`docs/phase2-plan.md`](docs/phase2-plan.md).
 
