@@ -40,6 +40,9 @@ import (
 type ToolResult struct {
 	Content []byte
 	IsError bool
+	// Authors are the principals who wrote the returned content, as the trusted
+	// tool server states them; empty when the server does not say.
+	Authors []string
 }
 
 // Upstream reaches tool servers.
@@ -88,6 +91,8 @@ const (
 // Taint labels the gateway adds on its own.
 const (
 	TaintCredentialEcho = "credential_echo"
+	// TaintForeignPrincipal: the result holds content another principal wrote.
+	TaintForeignPrincipal = "foreign_principal"
 )
 
 // Response is what the agent receives.
@@ -477,6 +482,14 @@ func (g *Gateway) execute(ctx context.Context, p *pending, resp *Response) (*Res
 			if echoed {
 				labels = append(labels, TaintCredentialEcho)
 				resp.CredentialScrubbed = true
+			}
+			// Content written by someone other than the task's principal must not
+			// steer actions taken with this principal's authority (W4).
+			for _, a := range res.Authors {
+				if a != p.decision.Actor.Principal {
+					labels = append(labels, TaintForeignPrincipal)
+					break
+				}
 			}
 			if g.cfg.Inspect != nil {
 				labels = append(labels, g.cfg.Inspect(string(content))...)

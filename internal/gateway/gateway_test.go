@@ -186,6 +186,13 @@ func newFixture(t *testing.T) *fixture {
 		"mail/send":       {manifest("mail", "send", "Send an email."), echo(`{"sent":true}`)},
 		"hr/salaries":     {manifest("hr", "salaries", "List salaries."), echo(`{"salaries":[]}`)},
 		"crm/unpinned":    {manifest("crm", "unpinned", "Not reviewed."), echo(`{}`)},
+		"crm/ticket": {manifest("crm", "ticket", "Read a support ticket."), func(args json.RawMessage, _ []broker.Credential) (*ToolResult, error) {
+			var a struct {
+				Author string `json:"author"`
+			}
+			json.Unmarshal(args, &a)
+			return &ToolResult{Content: []byte(`{"ticket":"synthetic"}`), Authors: []string{a.Author}}, nil
+		}},
 		"crm/leaky": {manifest("crm", "leaky", "Echoes its auth header."), func(_ json.RawMessage, creds []broker.Credential) (*ToolResult, error) {
 			return &ToolResult{Content: []byte(`{"debug":"auth=` + creds[0].Value.Reveal() + `"}`)}, nil
 		}},
@@ -603,6 +610,39 @@ func TestTaintBlocksEmailAfterWebContent(t *testing.T) {
 	}
 	if d := f.receipt(t, mail.DecisionSeq); fmt.Sprint(d.Decision.Taint) != "[flag:instruction web]" {
 		t.Fatalf("decision receipt taint %v", d.Decision.Taint)
+	}
+	f.verifyLog(t)
+}
+
+func TestForeignAuthorsLabelTheTask(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+
+	own, err := f.gw.Call(ctx, f.aliceCred, "crm", "ticket", json.RawMessage(`{"author":"alice@tenant-a"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if own.Status != StatusOK || len(own.Taint) != 0 {
+		t.Fatalf("ticket written by the task's own principal was labeled: %+v", own)
+	}
+
+	foreign, err := f.gw.Call(ctx, f.aliceCred, "crm", "ticket", json.RawMessage(`{"author":"bob@tenant-b"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foreign.Status != StatusOK || fmt.Sprint(foreign.Taint) != "["+TaintForeignPrincipal+"]" {
+		t.Fatalf("ticket written by another principal: %+v", foreign)
+	}
+	if r := f.receipt(t, foreign.ResultSeq); fmt.Sprint(r.Result.Taint) != "["+TaintForeignPrincipal+"]" {
+		t.Fatalf("result receipt taint %v", r.Result.Taint)
+	}
+	// The label stays on the task, so the next decision is made knowing it.
+	next, err := f.gw.Call(ctx, f.aliceCred, "crm", "lookup", json.RawMessage(`{"id":"c-100"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := f.receipt(t, next.DecisionSeq); fmt.Sprint(d.Decision.Taint) != "["+TaintForeignPrincipal+"]" {
+		t.Fatalf("next decision taint %v", d.Decision.Taint)
 	}
 	f.verifyLog(t)
 }

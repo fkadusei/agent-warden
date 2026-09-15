@@ -47,6 +47,24 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+func TestLabel(t *testing.T) {
+	c, err := Load(write(t, strings.Replace(good, `"taint": {"web": "web"}`,
+		`"taint": {"web": "web", "crm": "crm"}, "tool_taint": {"crm/lookup": "pii"}`, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ server, tool, want string }{
+		{"crm", "lookup", "pii"}, // the tool entry wins over the server entry
+		{"crm", "export", "crm"},
+		{"web", "fetch", "web"},
+		{"mail", "send", ""},
+	} {
+		if got := c.Label(tc.server, tc.tool); got != tc.want {
+			t.Errorf("Label(%s, %s) = %q, want %q", tc.server, tc.tool, got, tc.want)
+		}
+	}
+}
+
 func TestLoadRejects(t *testing.T) {
 	cases := map[string]string{
 		"unknown field":      strings.Replace(good, `"kid": "k1"`, `"kid": "k1", "debug": true`, 1),
@@ -56,6 +74,10 @@ func TestLoadRejects(t *testing.T) {
 		"bad interval":       strings.Replace(good, `"kid": "k1"`, `"kid": "k1", "checkpoint_interval": "soon"`, 1),
 		"too short interval": strings.Replace(good, `"kid": "k1"`, `"kid": "k1", "checkpoint_interval": "10ms"`, 1),
 		"trailing data":      good + ` {}`,
+		"tool_taint no tool": strings.Replace(good, `"taint": {"web": "web"}`, `"tool_taint": {"crm": "pii"}`, 1),
+		"tool_taint nested":  strings.Replace(good, `"taint": {"web": "web"}`, `"tool_taint": {"crm/a/b": "pii"}`, 1),
+		"tool_taint empty":   strings.Replace(good, `"taint": {"web": "web"}`, `"tool_taint": {"crm/lookup": ""}`, 1),
+		"taint empty label":  strings.Replace(good, `"taint": {"web": "web"}`, `"taint": {"web": ""}`, 1),
 	}
 	for name, data := range cases {
 		t.Run(name, func(t *testing.T) {

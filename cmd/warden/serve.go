@@ -131,7 +131,7 @@ func serve(ctx context.Context, cfg *config.Config, out io.Writer, ready func(ad
 	gw, err := gateway.New(gateway.Config{
 		Store: st, Registry: reg, Policy: eng, Broker: brk, Roots: pool, Approvers: approvers, Upstream: up,
 		Roles:   func(p string) []string { return cfg.Roles[p] },
-		Taint:   func(server, _ string) string { return cfg.Taint[server] },
+		Taint:   func(server, tool string) string { return cfg.Label(server, tool) },
 		Inspect: func(content string) []string { return inspect.Flags(inspect.Inspect(content, toolNames)) },
 	})
 	if err != nil {

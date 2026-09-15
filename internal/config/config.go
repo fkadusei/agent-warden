@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -73,6 +74,9 @@ type Config struct {
 	Roles map[string][]string `json:"roles,omitempty"`
 	// Taint maps a server to the taint label its output adds.
 	Taint map[string]string `json:"taint,omitempty"`
+	// ToolTaint maps a tool ID ("server/tool") to the label its output adds, such as
+	// "pii" for a customer lookup; it takes precedence over the server's label.
+	ToolTaint map[string]string `json:"tool_taint,omitempty"`
 
 	Servers []Server `json:"servers"`
 
@@ -132,7 +136,30 @@ func (c *Config) validate() error {
 	if c.Listen == c.ApproverListen {
 		return errors.New("listen and approver_listen must differ")
 	}
+	for id, label := range c.ToolTaint {
+		server, tool, ok := strings.Cut(id, "/")
+		if !ok || server == "" || tool == "" || strings.Contains(tool, "/") {
+			return fmt.Errorf("tool_taint key %q must be server/tool", id)
+		}
+		if label == "" {
+			return fmt.Errorf("tool_taint label for %q is empty", id)
+		}
+	}
+	for server, label := range c.Taint {
+		if server == "" || label == "" {
+			return errors.New("taint entries need a server and a label")
+		}
+	}
 	return nil
+}
+
+// Label returns the taint label a tool's output adds: its tool_taint entry if
+// present, otherwise its server's taint entry, otherwise "".
+func (c *Config) Label(server, tool string) string {
+	if l, ok := c.ToolTaint[server+"/"+tool]; ok {
+		return l
+	}
+	return c.Taint[server]
 }
 
 // Path resolves p against the configuration file's directory.

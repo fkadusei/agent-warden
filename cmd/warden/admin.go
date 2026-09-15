@@ -52,6 +52,20 @@ permit (principal in Role::"support", action in [Action::"call", Action::"call_u
 @id("no_email_while_tainted")
 forbid (principal, action, resource == Tool::"mail/send")
 when { context.taint.contains("web") };
+
+// Planted instructions or content written by another principal can still be read,
+// but refunds and email then need a human approver.
+@id("suspicious_content_needs_approval")
+forbid (principal, action == Action::"call_unattended", resource)
+when {
+  (resource == Tool::"payments/refund" || resource == Tool::"mail/send") &&
+  (context.taint.contains("flag:instruction") || context.taint.contains("foreign_principal"))
+};
+
+// Customer data never leaves the tenant by email.
+@id("no_pii_outside_tenant")
+forbid (principal, action, resource == Tool::"mail/send")
+when { context.taint.contains("pii") && !(context.args.to like "*@tenant-a.example") };
 `
 
 const exampleBroker = `{
@@ -156,8 +170,9 @@ func cmdInit(_ context.Context, args []string, _ io.Reader, out io.Writer) error
 		Store: "data/receipts.db", Anchor: "data/anchor.jsonl",
 		CheckpointEvery: 100, CheckpointInterval: config.Duration{Duration: time.Minute},
 		Policy: "policy.cedar", Pins: "pins.json", Broker: "broker.json", SecretsDir: "secrets", Approvers: "approvers.json",
-		Roles: map[string][]string{"alice@tenant-a": {"support"}},
-		Taint: map[string]string{"web": "web"},
+		Roles:     map[string][]string{"alice@tenant-a": {"support"}},
+		Taint:     map[string]string{"web": "web"},
+		ToolTaint: map[string]string{"crm/lookup": "pii"},
 	}
 	for _, s := range exampletools.Servers {
 		cfg.Servers = append(cfg.Servers, config.Server{Name: s, URL: base + "/" + s})

@@ -191,7 +191,51 @@ func (u *Upstream) Call(ctx context.Context, server, tool string, args json.RawM
 	if err != nil {
 		return nil, err
 	}
-	return &gateway.ToolResult{Content: content, IsError: res.IsError}, nil
+	authors, err := Authors(res.Meta)
+	if err != nil {
+		return nil, fmt.Errorf("upstream: call %s/%s: %w", server, tool, err)
+	}
+	return &gateway.ToolResult{Content: content, IsError: res.IsError, Authors: authors}, nil
+}
+
+// AuthorsMetaKey is the result _meta key where a tool server lists the principals
+// who wrote the content it returns (for example, the reporter of a support ticket).
+const AuthorsMetaKey = "io.github.fkadusei.agent-warden/authors"
+
+const (
+	maxAuthors   = 32
+	maxAuthorLen = 256
+)
+
+// Authors reads the authors a tool server stated in a result's _meta. A missing key
+// means the server did not say. A present but malformed value is an error, so a call
+// with unreadable provenance fails instead of passing as unlabeled.
+func Authors(meta map[string]any) ([]string, error) {
+	v, ok := meta[AuthorsMetaKey]
+	if !ok {
+		return nil, nil
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be a list of principals", AuthorsMetaKey)
+	}
+	if len(list) > maxAuthors {
+		return nil, fmt.Errorf("%s lists more than %d principals", AuthorsMetaKey, maxAuthors)
+	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		s, ok := item.(string)
+		if !ok || s == "" || len(s) > maxAuthorLen {
+			return nil, fmt.Errorf("%s entries must be principals of 1-%d bytes", AuthorsMetaKey, maxAuthorLen)
+		}
+		for _, r := range s {
+			if r < 0x20 || r == 0x7f {
+				return nil, fmt.Errorf("%s entry contains a control character", AuthorsMetaKey)
+			}
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 // render returns text content joined by newlines, or the JSON of the content and
