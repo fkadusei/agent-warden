@@ -200,7 +200,7 @@ agent ◄──result (tagged)───┘</code></pre>
     <tr><td><code>kid</code> (protected header, not the payload)</td><td>Which signing key epoch; resolves to a certificate</td><td>W11</td></tr>
   </tbody>
 </table></div>
-<p>Receipt types: <code>decision</code>, <code>approval</code>, <code>result</code>, <code>key_rotation</code>, <code>checkpoint</code>. Implemented in <code>internal/receipt</code>: <code>decision</code> and <code>result</code> <span class="pill g">passing</span>. The other three are reserved; their bodies are not specified yet, and receipts of those types are refused rather than accepted.</p>
+<p>Receipt types: <code>decision</code>, <code>approval</code>, <code>result</code>, <code>key_rotation</code>, <code>checkpoint</code>. Implemented in <code>internal/receipt</code>: <code>decision</code> and <code>result</code> <span class="pill g">passing</span>. The other three are reserved; their bodies are not specified yet, and receipts of those types are refused rather than accepted. Checkpoints (§4.4) turned out not to need a receipt type: they are separate signed statements, kept outside the log.</p>
 <p>A <code>result</code> receipt carries the same <code>task_id</code>, <code>actor</code>, and <code>call</code> as its decision, plus <code>result: {decision_seq, status, result_commitment, taint}</code>. <code>decision_seq</code> must be lower than the receipt's own <code>seq</code>; <code>result_commitment</code> is required when <code>status</code> is <code>ok</code>.</p>
 <div class="box info">
   <span class="tag">Format rules (enforced on sign and verify)</span>
@@ -228,8 +228,9 @@ agent ◄──result (tagged)───┘</code></pre>
 <ul>
   <li><strong>Genesis:</strong> <code>seq=0</code>, <code>prev</code> = SHA-256 of the canonical chain parameters <code>{domain: "agent-warden/genesis/v1", chain_id, alg, alg_ref, kid, key}</code>, where <code>key</code> is the digest of the composite public key that signs the first receipt. The chain is bound to its first signing key; a validly signed first receipt from any other key fails as <code>chain_break</code>. (Binding to the key-epoch <em>certificate</em> follows once certificates are built.)</li>
   <li><strong>Appending</strong> (<code>internal/chain.Appender</code>) <span class="pill g">passing</span> assigns <code>chain_id</code>, <code>seq</code>, and <code>prev</code>, refuses a timestamp earlier than the previous receipt's, and advances only after a successful signature. The caller must durably write each line before appending the next (ADR-0004).</li>
-  <li><strong>Checkpoint:</strong> every <em>N</em> receipts or <em>T</em> seconds (whichever first), Warden signs <code>{chain_id, size, root}</code> where <code>root</code> is a Merkle root over receipt hashes. The Merkle root lets a verifier later prove that one receipt is in the log without downloading all of it.</li>
-  <li><strong>Anchoring:</strong> each checkpoint is sent to an external anchor. v1 supports a write-once file target and an RFC 3161 timestamp token; a witness network is future work.</li>
+  <li><strong>Checkpoint</strong> (<code>internal/checkpoint</code>) <span class="pill g">passing</span>: every <em>N</em> receipts or <em>T</em> seconds (whichever first, with at least one new receipt), Warden signs <code>{v, domain: "agent-warden/checkpoint/v1", chain_id, size, root, head, ts}</code>. <code>root</code> is the RFC 9162 Merkle tree hash over the first <code>size</code> log lines (leaf = SHA-256(0x00 ‖ line), node = SHA-256(0x01 ‖ left ‖ right)); <code>head</code> is the digest of line <code>size − 1</code>. Checkpoints use the same envelope and key as receipts but are <strong>not receipts in the chain</strong>; their domain keeps the two apart, and tests confirm neither is accepted as the other. The Merkle implementation (<code>internal/merkle</code>) is checked against the transparency-dev test vectors, and its inclusion proofs let a verifier prove one receipt is in the log without the whole log.</li>
+  <li><strong>Anchoring:</strong> each signed checkpoint is published outside Warden's control. Implemented: a file anchor that appends one line per checkpoint and syncs every write. It only appends; making the file write-once is the job of where it lives (an append-only filesystem flag, WORM storage, or another account). Reading an anchor verifies every signature and requires strictly growing sizes and non-decreasing timestamps. <strong>Not yet implemented:</strong> RFC 3161 timestamps and witnesses.</li>
+  <li><strong>Checking a log against checkpoints</strong> (<code>chain.VerifyWithCheckpoints</code>): every anchored checkpoint must match the log's prefix of its size. A shorter log means receipts were removed; a different root or head means a rewrite, or an anchor showing a forked history. The report gives <code>Checkpointed</code> (largest size covered) and <code>Unanchored</code> (receipts after it — the exposure window).</li>
   <li><strong>Exposure window:</strong> receipts after the last anchored checkpoint are not truncation-proof (W10 residual risk). Default <em>N</em>=100, <em>T</em>=60s, both configurable.</li>
 </ul>
 
@@ -270,12 +271,14 @@ agent ◄──result (tagged)───┘</code></pre>
     <tr><td><code>duplicate_result</code></td><td>A decision already has a result</td></tr>
     <tr><td><code>denied_call_executed</code></td><td>A result exists for a <code>deny</code> decision</td></tr>
     <tr><td><code>missing_approval</code></td><td>A result exists for a <code>require_approval</code> decision (approval receipts not yet specified, so none can be shown)</td></tr>
+    <tr><td><code>checkpoint_mismatch</code></td><td>The log is shorter than an anchored checkpoint, its prefix hashes differently, or the checkpoint is for another chain</td></tr>
   </tbody>
 </table></div>
-<p>Still to come: <code>revoked_key</code> (with certificates) and <code>checkpoint_mismatch</code> (with checkpoints). On success, the report also lists <strong>open decisions</strong>: allowed decisions with no result receipt, which are either still running or a gap to investigate.</p>
+<p>Still to come: <code>revoked_key</code> (with certificates). On success, the report also lists <strong>open decisions</strong> (allowed decisions with no result receipt, which are either still running or a gap to investigate), plus <code>Checkpointed</code> and <code>Unanchored</code>.</p>
 <div class="box warn">
-  <span class="tag">Tested limits of the chain alone</span>
-  <p>Truncating the newest receipts, and rewriting the whole log with the real key, both still verify. Tests pin this down on purpose; checkpoints (§4.4, ADR-0003) close these gaps.</p>
+  <span class="tag">What checkpoints add, tested both ways</span>
+  <p>Without a checkpoint, truncating the newest receipts and rewriting the whole log with the real key both still verify. Against an anchored checkpoint, truncation below its size, a full rewrite, and an anchor showing a forked history all fail as <code>checkpoint_mismatch</code>.</p>
+  <p>Changes to receipts <em>after</em> the last checkpoint still verify: that is the exposure window, and the report states its size. Because ML-DSA signatures are randomized, re-signing any receipt changes its bytes, so a rewrite can't reproduce a checkpointed prefix even with the key.</p>
 </div>
 
 <h2 id="benchmark">6. Benchmark</h2>

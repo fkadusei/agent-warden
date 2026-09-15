@@ -1,9 +1,7 @@
 package receipt
 
 import (
-	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -38,7 +36,8 @@ type header struct {
 	Kid    string   `json:"kid"`
 }
 
-// Signed is a receipt in flattened JWS JSON serialization.
+// Signed is a signed object in flattened JWS JSON serialization. Receipts and
+// checkpoints share this envelope; their payloads carry different domain values.
 type Signed struct {
 	Payload   string `json:"payload"`
 	Protected string `json:"protected"`
@@ -51,18 +50,28 @@ func malformed(format string, a ...any) error {
 
 // Sign validates r and signs it with k under key ID kid.
 func Sign(k *composite.PrivateKey, kid string, r *Receipt) (*Signed, error) {
-	if name := k.Public().Suite().Name; name != Alg {
-		return nil, fmt.Errorf("receipt: key suite %s, want %s", name, Alg)
-	}
-	if err := validID("kid", kid); err != nil {
-		return nil, err
-	}
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
 	payload, err := canonical.Encode(r)
 	if err != nil {
 		return nil, err
+	}
+	return SignPayload(k, kid, payload)
+}
+
+// SignPayload signs canonical JSON payload bytes with k under key ID kid. The
+// payload must carry its own domain value so it cannot be confused with other
+// signed objects (threat W14).
+func SignPayload(k *composite.PrivateKey, kid string, payload []byte) (*Signed, error) {
+	if name := k.Public().Suite().Name; name != Alg {
+		return nil, fmt.Errorf("receipt: key suite %s, want %s", name, Alg)
+	}
+	if err := validID("kid", kid); err != nil {
+		return nil, err
+	}
+	if err := canonical.Check(payload); err != nil {
+		return nil, fmt.Errorf("receipt: payload: %w", err)
 	}
 	hdr, err := canonical.Encode(header{Alg: Alg, AlgRef: AlgRef, Crit: []string{"alg_ref"}, Kid: kid})
 	if err != nil {
@@ -81,7 +90,7 @@ func (s *Signed) signingInput() []byte {
 	return []byte(s.Protected + "." + s.Payload)
 }
 
-// Line returns the canonical one-line encoding stored in a receipt log.
+// Line returns the canonical one-line encoding stored in a log.
 func (s *Signed) Line() ([]byte, error) {
 	return canonical.Encode(s)
 }
@@ -96,18 +105,19 @@ func (s *Signed) Hash() (string, error) {
 	return digest.SHA256(line), nil
 }
 
-// ParseLine decodes one receipt log line. The line must be canonical and contain
+// ParseLine decodes one log line. The line must be canonical and contain
 // exactly the three envelope fields.
 func ParseLine(line []byte) (*Signed, error) {
 	var s Signed
-	if err := decodeStrict(line, &s); err != nil {
+	if err := canonical.DecodeStrict(line, &s); err != nil {
 		return nil, malformed("line: %v", err)
 	}
 	return &s, nil
 }
 
 // KeyID returns the key ID from the protected header so the caller can look up
-// the verification key. The header is not authenticated until Verify succeeds.
+// the verification key. The header is not authenticated until verification
+// succeeds.
 func (s *Signed) KeyID() (string, error) {
 	h, err := s.header()
 	if err != nil {
@@ -122,7 +132,7 @@ func (s *Signed) header() (*header, error) {
 		return nil, malformed("protected header encoding: %v", err)
 	}
 	var h header
-	if err := decodeStrict(raw, &h); err != nil {
+	if err := canonical.DecodeStrict(raw, &h); err != nil {
 		return nil, malformed("protected header: %v", err)
 	}
 	if h.Alg != Alg {
@@ -141,8 +151,25 @@ func (s *Signed) header() (*header, error) {
 }
 
 // Verify checks the envelope and signature with pub, then decodes and validates
-// the payload. The payload is not parsed until the signature verifies.
+// the receipt payload. The payload is not parsed until the signature verifies.
 func Verify(pub *composite.PublicKey, s *Signed) (*Receipt, error) {
+	payload, err := VerifyPayload(pub, s)
+	if err != nil {
+		return nil, err
+	}
+	var r Receipt
+	if err := canonical.DecodeStrict(payload, &r); err != nil {
+		return nil, malformed("payload: %v", err)
+	}
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// VerifyPayload checks the envelope header and signature with pub and returns
+// the authenticated payload bytes, still undecoded.
+func VerifyPayload(pub *composite.PublicKey, s *Signed) ([]byte, error) {
 	if name := pub.Suite().Name; name != Alg {
 		return nil, fmt.Errorf("receipt: key suite %s, want %s", name, Alg)
 	}
@@ -160,34 +187,5 @@ func Verify(pub *composite.PublicKey, s *Signed) (*Receipt, error) {
 	if err != nil {
 		return nil, malformed("payload encoding: %v", err)
 	}
-	var r Receipt
-	if err := decodeStrict(payload, &r); err != nil {
-		return nil, malformed("payload: %v", err)
-	}
-	if err := r.Validate(); err != nil {
-		return nil, err
-	}
-	return &r, nil
-}
-
-// decodeStrict decodes canonical JSON into v and requires that re-encoding v
-// reproduces the input exactly. This rejects non-canonical input, unknown
-// fields, missing fields, duplicate keys, and numbers JCS would change.
-func decodeStrict(b []byte, v any) error {
-	if err := canonical.Check(b); err != nil {
-		return err
-	}
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		return err
-	}
-	again, err := canonical.Encode(v)
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(again, b) {
-		return errors.New("fields do not round-trip (missing, empty, or out-of-range values)")
-	}
-	return nil
+	return payload, nil
 }

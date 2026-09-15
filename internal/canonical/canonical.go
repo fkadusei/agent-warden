@@ -57,3 +57,26 @@ func Check(b []byte) error {
 	}
 	return nil
 }
+
+// DecodeStrict decodes canonical JSON into v and requires that re-encoding v
+// reproduces the input exactly. This rejects non-canonical input, unknown
+// fields, missing fields, duplicate keys, empty arrays written instead of
+// omitted, and numbers JCS would change.
+func DecodeStrict(b []byte, v any) error {
+	if err := Check(b); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	again, err := Encode(v)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(again, b) {
+		return errors.New("canonical: fields do not round-trip (missing, empty, or out-of-range values)")
+	}
+	return nil
+}

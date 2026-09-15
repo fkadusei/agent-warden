@@ -2,13 +2,16 @@ package chain
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
 
+	"github.com/fkadusei/agent-warden/internal/checkpoint"
 	"github.com/fkadusei/agent-warden/internal/composite"
 	"github.com/fkadusei/agent-warden/internal/digest"
+	"github.com/fkadusei/agent-warden/internal/merkle"
 	"github.com/fkadusei/agent-warden/internal/receipt"
 )
 
@@ -29,6 +32,7 @@ const (
 	ReasonDuplicateResult    Reason = "duplicate_result"
 	ReasonDeniedCallExecuted Reason = "denied_call_executed"
 	ReasonMissingApproval    Reason = "missing_approval"
+	ReasonCheckpointMismatch Reason = "checkpoint_mismatch"
 )
 
 // maxLine bounds a single log line. A receipt line is a few kilobytes.
@@ -62,6 +66,12 @@ type Report struct {
 	// OpenDecisions lists allowed decisions that have no result receipt yet.
 	// Each is either still running or a gap that must be investigated (ADR-0004).
 	OpenDecisions []int64
+	// Checkpointed is the number of receipts covered by the largest checkpoint
+	// the log was checked against.
+	Checkpointed int64
+	// Unanchored is the number of receipts after the last checkpoint. These can
+	// still be truncated or rewritten undetectably: the exposure window (W10).
+	Unanchored int64
 }
 
 type decisionInfo struct {
@@ -76,15 +86,34 @@ type decisionInfo struct {
 // signature, chain membership, sequence, linkage, time order, and that every
 // result receipt refers to an earlier allowed decision for the same call.
 // It stops at the first failure and returns it as a *Failure.
+//
+// Verify alone cannot detect truncation of the newest receipts or a full
+// rewrite by the key holder; use VerifyWithCheckpoints for that.
 func Verify(log io.Reader, chainID string, keys KeyResolver) (*Report, error) {
+	return VerifyWithCheckpoints(log, chainID, keys, nil)
+}
+
+// VerifyWithCheckpoints verifies the log as Verify does, then checks it against
+// anchored checkpoints. The checkpoints must already be signature-verified, for
+// example with checkpoint.ReadVerified. Every checkpoint must match the log's
+// prefix of its size: a log shorter than a checkpoint was truncated, and a log
+// whose prefix hashes differently was rewritten, or the anchor shows a fork.
+func VerifyWithCheckpoints(log io.Reader, chainID string, keys KeyResolver, cps []*checkpoint.Checkpoint) (*Report, error) {
 	sc := bufio.NewScanner(log)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLine)
+
+	// Heads of the lines each checkpoint covers, by checkpoint size.
+	heads := map[int64]string{}
+	for _, c := range cps {
+		heads[c.Size] = ""
+	}
 
 	var (
 		lineNo    int
 		seq       int64
 		prev      string
 		lastTS    string
+		leaves    []merkle.Hash
 		decisions = map[int64]*decisionInfo{}
 	)
 
@@ -157,6 +186,10 @@ func Verify(log io.Reader, chainID string, keys KeyResolver) (*Report, error) {
 		}
 
 		prev = digest.SHA256(line)
+		leaves = append(leaves, merkle.LeafHash(line))
+		if _, ok := heads[seq+1]; ok {
+			heads[seq+1] = prev
+		}
 		lastTS = r.TS
 		seq++
 	}
@@ -168,6 +201,24 @@ func Verify(log io.Reader, chainID string, keys KeyResolver) (*Report, error) {
 	}
 
 	rep := &Report{ChainID: chainID, Receipts: lineNo, LastSeq: seq - 1, Head: prev}
+
+	sorted := slices.Clone(cps)
+	slices.SortFunc(sorted, func(a, b *checkpoint.Checkpoint) int { return cmp.Compare(a.Size, b.Size) })
+	for _, c := range sorted {
+		switch {
+		case c.ChainID != chainID:
+			return nil, &Failure{Line: 0, Seq: 0, Reason: ReasonCheckpointMismatch,
+				Detail: fmt.Sprintf("checkpoint for chain %q", c.ChainID)}
+		case c.Size > int64(lineNo):
+			return nil, &Failure{Line: lineNo + 1, Seq: int64(lineNo), Reason: ReasonCheckpointMismatch,
+				Detail: fmt.Sprintf("log has %d receipts but the checkpoint at %s covers %d: receipts were removed", lineNo, c.TS, c.Size)}
+		case merkle.Digest(merkle.Root(leaves[:c.Size])) != c.Root || heads[c.Size] != c.Head:
+			return nil, &Failure{Line: int(c.Size), Seq: c.Size - 1, Reason: ReasonCheckpointMismatch,
+				Detail: fmt.Sprintf("the first %d receipts differ from the checkpoint at %s", c.Size, c.TS)}
+		}
+		rep.Checkpointed = c.Size
+	}
+	rep.Unanchored = int64(lineNo) - rep.Checkpointed
 	for s, d := range decisions {
 		if d.result == receipt.Allow && !d.resulted {
 			rep.OpenDecisions = append(rep.OpenDecisions, s)

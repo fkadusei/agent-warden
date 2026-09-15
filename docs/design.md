@@ -98,7 +98,8 @@ signing, so the same receipt always produces the same bytes.
 Receipt types: `decision`, `approval`, `result`, `key_rotation`, `checkpoint`.
 Implemented in `internal/receipt`: `decision` and `result`. The other three are
 reserved; their bodies are not specified yet, and receipts of those types are
-refused rather than accepted.
+refused rather than accepted. Checkpoints (§4.4) turned out not to need a receipt
+type: they are separate signed statements, kept outside the log.
 
 A `result` receipt carries the same `task_id`, `actor`, and `call` as its decision,
 plus `result: {decision_seq, status, result_commitment, taint}`. `decision_seq` must
@@ -167,13 +168,28 @@ $500?") from the receipt alone.
   refuses a timestamp earlier than the previous receipt's, and advances only after
   a successful signature. The caller must durably write each line before appending
   the next (ADR-0004).
-- **Checkpoint:** every *N* receipts or *T* seconds (whichever first), Warden signs
-  `{chain_id, size, root}` where `root` is a Merkle root over receipt hashes. The
-  Merkle root lets a verifier later prove that one receipt is in the log without
-  downloading all of it.
-- **Anchoring:** each checkpoint is sent to an external anchor. v1 supports a
-  write-once file target and an RFC 3161 timestamp token; a witness network is future
-  work.
+- **Checkpoint** (`internal/checkpoint`): every *N* receipts or *T* seconds
+  (whichever first, with at least one new receipt), Warden signs
+  `{v, domain: "agent-warden/checkpoint/v1", chain_id, size, root, head, ts}`.
+  `root` is the RFC 9162 Merkle tree hash over the first `size` log lines (leaf =
+  SHA-256(0x00 ‖ line), node = SHA-256(0x01 ‖ left ‖ right)); `head` is the digest of
+  line `size − 1`. Checkpoints use the same envelope and key as receipts but are
+  **not receipts in the chain**; their domain keeps the two apart, and tests confirm
+  neither is accepted as the other. The Merkle implementation (`internal/merkle`) is
+  checked against the transparency-dev test vectors, and its inclusion proofs let a
+  verifier prove one receipt is in the log without the whole log.
+- **Anchoring:** each signed checkpoint is published outside Warden's control.
+  Implemented: a file anchor that appends one line per checkpoint and syncs every
+  write. It only appends; making the file write-once is the job of where it lives
+  (an append-only filesystem flag, WORM storage, or another account). Reading an
+  anchor verifies every signature and requires strictly growing sizes and
+  non-decreasing timestamps. **Not yet implemented:** RFC 3161 timestamps and
+  witnesses.
+- **Checking a log against checkpoints** (`chain.VerifyWithCheckpoints`): every
+  anchored checkpoint must match the log's prefix of its size. A shorter log means
+  receipts were removed; a different root or head means a rewrite, or an anchor
+  showing a forked history. The report gives `Checkpointed` (largest size covered)
+  and `Unanchored` (receipts after it — the exposure window).
 - **Exposure window:** receipts after the last anchored checkpoint are not
   truncation-proof (W10 residual risk). Default *N*=100, *T*=60s, both configurable.
 
@@ -223,14 +239,20 @@ Implemented in `internal/chain.Verify`:
 | `duplicate_result` | A decision already has a result |
 | `denied_call_executed` | A result exists for a `deny` decision |
 | `missing_approval` | A result exists for a `require_approval` decision (approval receipts not yet specified, so none can be shown) |
+| `checkpoint_mismatch` | The log is shorter than an anchored checkpoint, its prefix hashes differently, or the checkpoint is for another chain |
 
-Still to come: `revoked_key` (with certificates) and `checkpoint_mismatch` (with
-checkpoints). On success, the report also lists **open decisions**: allowed decisions
-with no result receipt, which are either still running or a gap to investigate.
+Still to come: `revoked_key` (with certificates). On success, the report also lists
+**open decisions** (allowed decisions with no result receipt, which are either still
+running or a gap to investigate), plus `Checkpointed` and `Unanchored`.
 
-**Tested limits of the chain alone:** truncating the newest receipts, and rewriting
-the whole log with the real key, both still verify. Tests pin this down on purpose;
-checkpoints (§4.4, ADR-0003) close these gaps.
+**What checkpoints add, tested both ways:** without a checkpoint, truncating the
+newest receipts and rewriting the whole log with the real key both still verify.
+Against an anchored checkpoint, truncation below its size, a full rewrite, and an
+anchor showing a forked history all fail as `checkpoint_mismatch`. Changes to
+receipts *after* the last checkpoint still verify: that is the exposure window, and
+the report states its size. Because ML-DSA signatures are randomized, re-signing
+any receipt changes its bytes, so a rewrite can't reproduce a checkpointed prefix
+even with the key.
 
 ## 6. Benchmark
 
