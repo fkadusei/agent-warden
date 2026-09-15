@@ -3,7 +3,8 @@
 *.pem
 *.key
 !testdata/**/*.pem
-keys/
+# Local key directory at the repo root only; internal/keys is source code.
+/keys/
 
 # Receipt logs and stores produced locally
 *.db

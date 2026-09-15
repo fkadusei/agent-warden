@@ -243,7 +243,14 @@ agent ◄──result (tagged)───┘</code></pre>
 </ul>
 
 <h2 id="verify">5. What <code>warden-verify</code> proves</h2>
-<pre><code>warden-verify --log receipts.jsonl --trust root.pem --checkpoint anchored.json</code></pre>
+<pre><code>warden-verify --log receipts.jsonl --chain CHAIN_ID --keys trusted-keys.json --anchor anchor.jsonl [--json]</code></pre>
+<ul>
+  <li><strong><code>--keys</code></strong> is a JWK Set of public keys in the draft's <code>AKP</code> format (<code>kty</code>, <code>alg</code>, <code>kid</code>, <code>pub</code>). This is interim trust input until key-epoch certificates exist (ADR-0008), when it becomes a root certificate. The file is rejected if any key contains private key material, has the wrong algorithm, or repeats a <code>kid</code>.</li>
+  <li><strong><code>--chain</code></strong> is required, so the log can't choose which chain it claims to be.</li>
+  <li><strong><code>--anchor</code></strong> is optional but strongly recommended. Without it, the result carries a warning that truncation and full rewrites by the key holder are undetectable.</li>
+  <li><strong>Exit status:</strong> <code>0</code> verified, <code>1</code> verification failed (log or anchor), <code>2</code> usage or file error. <code>--json</code> prints the same result for scripts.</li>
+  <li>It builds as a single static binary (<code>CGO_ENABLED=0</code>), about 4 MB. <span class="pill g">passing</span></li>
+</ul>
 <div class="table-wrap"><table>
   <thead><tr><th>It proves</th><th>It does not prove</th></tr></thead>
   <tbody>
@@ -303,7 +310,7 @@ agent ◄──result (tagged)───┘</code></pre>
   <thead><tr><th>Phase</th><th>Deliverable</th><th>Gate</th></tr></thead>
   <tbody>
     <tr><td><strong>0</strong> <span class="pill g">done</span></td><td>This design, the threat model, ADRs 0001–0008</td><td>Owner review</td></tr>
-    <tr><td><strong>1</strong></td><td>Receipt library: JCS, composite signer, chain, commitments, <code>warden-verify</code></td><td>Draft test vectors pass; all <code>evidence/*</code> tamper tests fail verification as expected</td></tr>
+    <tr><td><strong>1</strong> <span class="pill g">done</span></td><td>Receipt library: JCS, composite signer, chain, commitments, checkpoints, <code>warden-verify</code></td><td>Draft test vectors pass; tamper tests fail verification as expected. <strong>Deferred:</strong> RFC 3161 anchoring, key-epoch certificates, key rotation and revocation, approval receipts</td></tr>
     <tr><td><strong>2</strong></td><td>Gateway: identity, policy, approvals, broker, registry, write-ahead receipts</td><td><code>authz</code>, <code>approval</code>, <code>poison</code>, fail-closed tests pass</td></tr>
     <tr><td><strong>3</strong></td><td>Output inspector + demo agent + synthetic tools</td><td><code>injection</code>, <code>exfil</code>, <code>deputy</code> scenarios run end to end</td></tr>
     <tr><td><strong>4</strong></td><td>Benchmark run with/without Warden; checkpoints + anchoring</td><td>Published results table incl. benign completion</td></tr>

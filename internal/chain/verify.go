@@ -41,11 +41,11 @@ const maxLine = 1 << 20
 // Failure identifies the first line that failed verification.
 type Failure struct {
 	// Line is the 1-based line number in the log.
-	Line int
+	Line int `json:"line"`
 	// Seq is the sequence number expected at that line.
-	Seq    int64
-	Reason Reason
-	Detail string
+	Seq    int64  `json:"seq"`
+	Reason Reason `json:"reason"`
+	Detail string `json:"detail"`
 }
 
 func (f *Failure) Error() string {

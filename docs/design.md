@@ -210,8 +210,20 @@ $500?") from the receipt alone.
 ## 5. What `warden-verify` proves
 
 ```
-warden-verify --log receipts.jsonl --trust root.pem --checkpoint anchored.json
+warden-verify --log receipts.jsonl --chain CHAIN_ID --keys trusted-keys.json --anchor anchor.jsonl [--json]
 ```
+
+- **`--keys`** is a JWK Set of public keys in the draft's `AKP` format
+  (`kty`, `alg`, `kid`, `pub`). This is interim trust input until key-epoch
+  certificates exist (ADR-0008), when it becomes a root certificate. The file is
+  rejected if any key contains private key material, has the wrong algorithm, or
+  repeats a `kid`.
+- **`--chain`** is required, so the log can't choose which chain it claims to be.
+- **`--anchor`** is optional but strongly recommended. Without it, the result carries
+  a warning that truncation and full rewrites by the key holder are undetectable.
+- **Exit status:** `0` verified, `1` verification failed (log or anchor), `2` usage or
+  file error. `--json` prints the same result for scripts.
+- It builds as a single static binary (`CGO_ENABLED=0`), about 4 MB.
 
 | It proves | It does not prove |
 |---|---|
@@ -280,7 +292,7 @@ with the model name and version, because they change with the model.
 | Phase | Deliverable | Gate |
 |---|---|---|
 | **0** | This design, the threat model, ADRs 0001–0008 | Owner review |
-| **1** | Receipt library: JCS, composite signer, chain, commitments, `warden-verify` | Draft test vectors pass; all `evidence/*` tamper tests fail verification as expected |
+| **1** ✅ | Receipt library: JCS, composite signer, chain, commitments, checkpoints, `warden-verify` | Draft test vectors pass; tamper tests fail verification as expected. **Deferred:** RFC 3161 anchoring, key-epoch certificates, key rotation and revocation, approval receipts |
 | **2** | Gateway: identity, policy, approvals, broker, registry, write-ahead receipts | `authz`, `approval`, `poison`, fail-closed tests pass |
 | **3** | Output inspector + demo agent + synthetic tools | `injection`, `exfil`, `deputy` scenarios run end to end |
 | **4** | Benchmark run with/without Warden; checkpoints + anchoring | Published results table incl. benign completion |
