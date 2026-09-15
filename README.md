@@ -101,8 +101,14 @@ approvals for different arguments, replays, another agent resuming, and expired 
 rejected approvals; tool descriptions or schemas changed after review (including
 between approval and execution) and tools added later; a failed receipt store, a
 missing tool credential, a dead tool server, a client without a credential, a forged
-identity header; and an edited receipt log. It exits `1` if any defense fails, and
-`go test ./...` runs the same gate.
+identity header; and an edited receipt log.
+
+It then plays every scenario in `scenarios/` against the example deployment with an
+agent that obeys every planted instruction: each attack call must be denied or held
+for approval without reaching a tool, and each benign task must complete. The report
+prints attacks blocked and benign tasks completed. It exits `1` if any defense fails,
+and `go test ./...` runs the same gates, including a check that a permit-everything
+policy makes every attack scenario fail.
 
 ## What works today
 
@@ -134,7 +140,9 @@ identity header; and an edited receipt log. It exits `1` if any defense fails, a
   `warden approve` checks the arguments it shows against the decision's commitment
   before signing.
 - **Attack gate (`cmd/warden-gate`):** 25 authorization, approval, tool-poisoning,
-  fail-closed, identity, and evidence attacks against the full stack, all refused.
+  fail-closed, identity, and evidence attacks against the full stack, all refused;
+  then the scenario corpus (injection, exfiltration, confused deputy, benign) played by
+  a compromised agent: every attack blocked, every benign task completed.
 
 Not yet: RFC 3161 anchoring, key rotation and revocation, full output inspection, and
 the benchmark.
