@@ -157,8 +157,16 @@ $500?") from the receipt alone.
 
 ### 4.4 Chain and checkpoints (ADR-0003)
 
-- **Genesis:** `seq=0`, `prev` = SHA-256 of the chain's parameters (chain ID,
-  algorithm, initial key certificate).
+- **Genesis:** `seq=0`, `prev` = SHA-256 of the canonical chain parameters
+  `{domain: "agent-warden/genesis/v1", chain_id, alg, alg_ref, kid, key}`, where `key`
+  is the digest of the composite public key that signs the first receipt. The chain
+  is therefore bound to its first signing key; a validly signed first receipt from
+  any other key fails as `chain_break`. (Binding to the key-epoch *certificate*
+  follows once certificates are built.)
+- **Appending** (`internal/chain.Appender`) assigns `chain_id`, `seq`, and `prev`,
+  refuses a timestamp earlier than the previous receipt's, and advances only after
+  a successful signature. The caller must durably write each line before appending
+  the next (ADR-0004).
 - **Checkpoint:** every *N* receipts or *T* seconds (whichever first), Warden signs
   `{chain_id, size, root}` where `root` is a Merkle root over receipt hashes. The
   Merkle root lets a verifier later prove that one receipt is in the log without
@@ -197,8 +205,32 @@ warden-verify --log receipts.jsonl --trust root.pem --checkpoint anchored.json
 | Both signature components are valid (no downgrade) | That the policy itself was a good policy |
 | A disclosed argument or result matches its commitment | Anything about calls whose data was not disclosed |
 
-On failure it names the first failing `seq` and the reason (`bad_signature`,
-`chain_break`, `seq_gap`, `revoked_key`, `checkpoint_mismatch`, `wrong_chain`).
+On failure it names the first failing line, the `seq` expected there, and the reason.
+Implemented in `internal/chain.Verify`:
+
+| Reason | Meaning |
+|---|---|
+| `empty_log` | No receipts |
+| `malformed` | Line is not a canonical envelope, or its header is invalid |
+| `unknown_key` | The `kid` is not a trusted key |
+| `bad_signature` | Composite signature fails |
+| `invalid_receipt` | Signed, but the payload breaks the format rules |
+| `wrong_chain` | Receipt belongs to a different chain |
+| `seq_gap` | Sequence number is not the next one (deletion, insertion, reorder) |
+| `chain_break` | `prev` doesn't match the previous line, or the genesis parameters |
+| `time_regression` | Timestamp earlier than the previous receipt |
+| `bad_reference` | Result points at something that isn't a matching earlier decision (same task, actor, and call) |
+| `duplicate_result` | A decision already has a result |
+| `denied_call_executed` | A result exists for a `deny` decision |
+| `missing_approval` | A result exists for a `require_approval` decision (approval receipts not yet specified, so none can be shown) |
+
+Still to come: `revoked_key` (with certificates) and `checkpoint_mismatch` (with
+checkpoints). On success, the report also lists **open decisions**: allowed decisions
+with no result receipt, which are either still running or a gap to investigate.
+
+**Tested limits of the chain alone:** truncating the newest receipts, and rewriting
+the whole log with the real key, both still verify. Tests pin this down on purpose;
+checkpoints (§4.4, ADR-0003) close these gaps.
 
 ## 6. Benchmark
 
