@@ -12,6 +12,7 @@ import (
 	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -19,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -35,7 +37,12 @@ var (
 	PolicyKeyEpoch = mustOID(Arc + ".1")
 	// PolicyTaskCredential marks a task credential.
 	PolicyTaskCredential = mustOID(Arc + ".2")
+	// PolicyServer marks Warden's own TLS server certificate (ADR-0011).
+	PolicyServer = mustOID(Arc + ".3")
 )
+
+// MaxServerLifetime is the longest a Warden server certificate may be valid.
+const MaxServerLifetime = 90 * 24 * time.Hour
 
 const (
 	// MaxTaskLifetime is the longest a task credential may be valid.
@@ -209,6 +216,54 @@ func (ca *CA) IssueTask(c TaskClaims, pub *mldsa.PublicKey, notBefore, notAfter 
 		Policies:    []x509.OID{PolicyTaskCredential},
 		URIs:        []*url.URL{urn(uriAgent, c.Agent), urn(uriPrincipal, c.Principal), urn(uriTask, c.Task)},
 	}, pub)
+}
+
+var dnsPattern = regexp.MustCompile(`^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+
+// IssueServer issues Warden's TLS server certificate for the given DNS names and
+// IP addresses. Wildcards are not allowed.
+func (ca *CA) IssueServer(dnsNames []string, ips []net.IP, pub *mldsa.PublicKey, notBefore, notAfter time.Time) ([]byte, error) {
+	if len(dnsNames)+len(ips) == 0 {
+		return nil, errors.New("identity: a server certificate needs at least one DNS name or IP address")
+	}
+	for _, n := range dnsNames {
+		if len(n) > 253 || !dnsPattern.MatchString(n) {
+			return nil, fmt.Errorf("identity: DNS name %q is invalid (wildcards are not allowed)", n)
+		}
+	}
+	if !isMLDSA65(pub) {
+		return nil, errors.New("identity: server key must be ML-DSA-65")
+	}
+	if !notAfter.After(notBefore) || notAfter.Sub(notBefore) > MaxServerLifetime {
+		return nil, fmt.Errorf("identity: server certificate lifetime must be positive and at most %s", MaxServerLifetime)
+	}
+	return ca.issue(&x509.Certificate{
+		Subject:     pkix.Name{CommonName: "Warden gateway"},
+		NotBefore:   notBefore,
+		NotAfter:    notAfter,
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		Policies:    []x509.OID{PolicyServer},
+		DNSNames:    dnsNames,
+		IPAddresses: ips,
+	}, pub)
+}
+
+// CheckServer is for tls.Config.VerifyConnection on agents and approvers: after Go
+// has verified the chain and host name, it requires that the server presented a
+// Warden server certificate, not some other certificate from the same root.
+func CheckServer(cs tls.ConnectionState) error {
+	if len(cs.PeerCertificates) == 0 {
+		return invalid("no server certificate")
+	}
+	leaf := cs.PeerCertificates[0]
+	if len(leaf.Policies) != 1 || !leaf.Policies[0].Equal(PolicyServer) {
+		return invalid("server certificate policies %v, want exactly %s", leaf.Policies, PolicyServer)
+	}
+	if leaf.SignatureAlgorithm.String() != "ML-DSA-65" {
+		return invalid("server certificate signature algorithm %s, want ML-DSA-65", leaf.SignatureAlgorithm)
+	}
+	return nil
 }
 
 // verify parses der, checks the chain, time, purpose policy, key type, and

@@ -55,9 +55,13 @@ command again to see what Warden catches. Delete `demo-output/` to run the demo 
   is receipted before anything runs; high-risk calls wait for an approver's signed
   statement; tool credentials are injected by Warden and scrubbed from results;
   untrusted output taints the task.
+- **MCP transport (`internal/mcpgw`, `internal/upstream`):** agents connect over MCP on
+  mutual TLS 1.3, proving their task credential with its key; pinned tools appear as
+  `server.tool`. Warden reaches tool servers as an MCP client and delivers their
+  credentials itself.
 
-Not yet: the MCP transport and `warden approve` CLI, RFC 3161 anchoring, key rotation
-and revocation, and the benchmark.
+Not yet: the `warden` server binary and `warden approve` CLI, RFC 3161 anchoring, key
+rotation and revocation, and the benchmark.
 
 ## Verify a receipt log
 

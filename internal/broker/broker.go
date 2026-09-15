@@ -228,6 +228,33 @@ func (b *Broker) For(server, tool string) ([]Credential, error) {
 	return out, nil
 }
 
+// ServerCredentials returns only the server-wide credentials (tool "*") for
+// server. Transports that set credentials once per connection, such as a stdio
+// process's environment, use this instead of For.
+func (b *Broker) ServerCredentials(server string) ([]Credential, error) {
+	var out []Credential
+	for _, bd := range b.bindings[bindingKey{server, "*"}] {
+		v, err := b.resolve(bd.Secret)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s %q for %s: %v", ErrSecret, bd.Inject, bd.Name, server, err)
+		}
+		out = append(out, Credential{Inject: bd.Inject, Name: bd.Name, Value: Secret{v: append([]byte(bd.Prefix), v...)}})
+	}
+	return out, nil
+}
+
+// Describe returns the bindings configured for server, without resolving any
+// secret, so a transport can refuse bindings it cannot honor.
+func (b *Broker) Describe(server string) []Binding {
+	var out []Binding
+	for k, bds := range b.bindings {
+		if k.server == server {
+			out = append(out, bds...)
+		}
+	}
+	return out
+}
+
 func (b *Broker) resolve(ref string) ([]byte, error) {
 	kind, name, _ := strings.Cut(ref, ":")
 	var v []byte

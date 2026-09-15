@@ -21,7 +21,7 @@ that checkpoint.
 
 | Component | Job | Threats |
 |---|---|---|
-| **Gateway** | The only path from agent to tools. Speaks MCP to the agent. | W7 |
+| **Gateway** | The only path from agent to tools. Speaks MCP to the agent: stateless Streamable HTTP over mutual TLS 1.3, where the client certificate is the agent's task credential; pinned tools appear as `server.tool`, plus `warden.resume` (ADR-0011, `internal/mcpgw`). Reaches tool servers as an MCP client (`internal/upstream`). | W7 |
 | **Identity** | Issues a short-lived, task-scoped X.509 credential naming the agent, the principal, and the task. Expires with the task. | W3, W4 |
 | **Policy** | Deny-by-default decision on principal + agent + tool + arguments + taint state → `allow` / `deny` / `require_approval`. | W1, W2, W4 |
 | **Approvals** | Single-use approvals bound to a call digest and a distinct approver. | W6 |

@@ -111,6 +111,7 @@
   <a href="#adr8">ADR-0008 Certificates</a>
   <a href="#adr9">ADR-0009 Approvals</a>
   <a href="#adr10">ADR-0010 Identity</a>
+  <a href="#adr11">ADR-0011 MCP transport</a>
 </nav>
 
 <main>
@@ -133,7 +134,7 @@
 <div class="table-wrap"><table>
   <thead><tr><th>Component</th><th>Job</th><th>Threats</th></tr></thead>
   <tbody>
-    <tr><td><strong>Gateway</strong></td><td>The only path from agent to tools. Speaks MCP to the agent.</td><td>W7</td></tr>
+    <tr><td><strong>Gateway</strong></td><td>The only path from agent to tools. Speaks MCP to the agent: stateless Streamable HTTP over mutual TLS 1.3, where the client certificate is the agent's task credential; pinned tools appear as <code>server.tool</code>, plus <code>warden.resume</code> (ADR-0011, <code>internal/mcpgw</code>). Reaches tool servers as an MCP client (<code>internal/upstream</code>). <span class="pill g">passing</span></td><td>W7</td></tr>
     <tr><td><strong>Identity</strong></td><td>Issues a short-lived, task-scoped X.509 credential naming the agent, the principal, and the task. Expires with the task.</td><td>W3, W4</td></tr>
     <tr><td><strong>Policy</strong></td><td>Deny-by-default decision on principal + agent + tool + arguments + taint state → <code>allow</code> / <code>deny</code> / <code>require_approval</code>.</td><td>W1, W2, W4</td></tr>
     <tr><td><strong>Approvals</strong></td><td>Single-use approvals bound to a call digest and a distinct approver.</td><td>W6</td></tr>
@@ -586,6 +587,14 @@ agent ◄──result (tagged)───┘</code></pre>
   <p><strong>Decision.</strong> The OID becomes Warden's arc: <code>.1</code> marks key-epoch certificates, <code>.2</code> task credentials, each as exactly one certificate policy. The Ed25519 key moves to a SAN URI, <code>urn:warden:ed25519:&lt;base64url&gt;</code>. Task credentials carry <code>urn:warden:agent</code>, <code>principal</code>, and <code>task</code> URIs, client-auth key usage, and at most 15 minutes of validity. Identity is read only from <code>urn:warden:</code> URIs, each exactly once; unknown Warden URIs and DNS, email, or IP names are rejected.</p>
   <p><strong>Consequences.</strong> Every certificate is standard X.509. Dropping the critical flag does not allow a downgrade, because receipts need both signature halves. A task credential cannot pass as a key-epoch certificate, or the reverse. Revocation is still deferred.</p>
   <p><strong>Rejected.</strong> An IANA Private Enterprise Number (waits on registration); hand-encoded certificates (reimplements X.509 parsing and validation).</p>
+</div>
+
+<div class="adr" id="adr11">
+  <h3>ADR-0011 — MCP transport and agent authentication <span class="pill g">Accepted</span></h3>
+  <p><strong>Decision.</strong> Agents reach Warden over stateless MCP Streamable HTTP on TLS 1.3 with mutual authentication; the client certificate is the agent's task credential, so the handshake proves the agent holds its key. A middleware overwrites any client-supplied <code>X-Warden-Peer-Certificate</code> header with the verified certificate, and the gateway verifies it again. Warden's own server certificate is a third profile (policy <code>…4786.3</code>) that agents check. Pinned tools are exposed as <code>server.tool</code>, plus <code>warden.resume</code>. Upstream HTTP servers get header credentials per call; stdio servers get server-wide environment credentials at start, with only <code>PATH</code> from Warden's environment.</p>
+  <p><strong>Why.</strong> Probed: Go 1.27 completes mutual TLS 1.3 with ML-DSA-65 certificates; the MCP SDK's stateless mode gives each request its own TLS identity, where sessions could be reused by another client.</p>
+  <p><strong>Consequences.</strong> No bearer tokens for agents. No server-to-client requests (sampling, elicitation). Agents reconnect when their credential expires. Tools are listed upstream on every call, adding latency.</p>
+  <p><strong>Rejected.</strong> Certificates sent as data (replayable); OAuth bearer tokens (stealable); stdio between agent and Warden (puts Warden inside the agent's trust boundary); stateful sessions (reusable by another client).</p>
 </div>
 
 <div class="box warn">
