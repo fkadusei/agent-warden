@@ -196,12 +196,19 @@ $500?") from the receipt alone.
 ### 4.5 Keys
 
 - Receipt signing keys are held only by the Signer, never by the agent.
-- Each key epoch has an X.509 certificate issued by a Warden root, with a dedicated
-  extended key usage for receipt signing. Certificates are signed with **plain
-  ML-DSA-65** (RFC 9881; ADR-0008), because no mainstream library supports composite
-  X.509. The certificate's subject public key is the ML-DSA-65 component; the Ed25519
-  component is bound in a critical Warden extension, so the verifier can rebuild the
-  composite receipt key.
+- Each key epoch has an X.509 certificate issued by a Warden root (ADR-0010,
+  `internal/identity`). Certificates are signed with **plain ML-DSA-65** (RFC 9881;
+  ADR-0008), because no mainstream library supports composite X.509. The certificate's
+  subject public key is the ML-DSA-65 component; the Ed25519 component is carried in a
+  SAN URI, `urn:warden:ed25519:<base64url>`, so the verifier can rebuild the composite
+  receipt key. The certificate's purpose is fixed by a certificate policy under
+  Warden's OID arc (`…4786.1` key epoch, `…4786.2` task credential). A critical
+  extension was the original plan, but Go 1.27 cannot create or parse extensions under
+  the 128-bit UUID OID; a missing Ed25519 key still cannot cause a downgrade, because
+  every receipt needs both signature halves.
+- Task credentials are ML-DSA-65 certificates naming the agent, principal, and task in
+  `urn:warden:` SAN URIs, valid for at most 15 minutes plus 1 minute of clock skew,
+  with client-authentication key usage.
 - **Rotation:** a `key_rotation` receipt signed by the outgoing key names the incoming
   key; the incoming key signs the next receipt. Verification crosses the boundary.
 - **Revocation:** receipts under a revoked key dated after the revocation time fail
@@ -305,9 +312,9 @@ with the model name and version, because they change with the model.
 ## 8. Open questions
 
 1. ~~Policy engine~~ — **decided: Cedar** (ADR-0007).
-2. ~~Certificate signatures~~ — **decided: plain ML-DSA-65** (ADR-0008), with the
-   Ed25519 binding extension under the UUID-based OID
-   `2.25.319797216735078154913038669087058524786`.
+2. ~~Certificate signatures~~ — **decided: plain ML-DSA-65** (ADR-0008). The UUID-based
+   OID `2.25.319797216735078154913038669087058524786` is Warden's arc for certificate
+   policies, and the Ed25519 key is bound by SAN URI (ADR-0010).
 3. **Draft churn.** The composite draft is at -04. If the construction changes, the
    receipt `v` and `alg` must change with it. Is pinning `alg_ref` in the protected
    header enough?

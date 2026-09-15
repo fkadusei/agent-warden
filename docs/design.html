@@ -110,6 +110,7 @@
   <a href="#adr7">ADR-0007 Cedar</a>
   <a href="#adr8">ADR-0008 Certificates</a>
   <a href="#adr9">ADR-0009 Approvals</a>
+  <a href="#adr10">ADR-0010 Identity</a>
 </nav>
 
 <main>
@@ -238,7 +239,8 @@ agent ◄──result (tagged)───┘</code></pre>
 <h3>4.5 Keys</h3>
 <ul>
   <li>Receipt signing keys are held only by the Signer, never by the agent.</li>
-  <li>Each key epoch has an X.509 certificate issued by a Warden root, with a dedicated extended key usage for receipt signing. Certificates are signed with <strong>plain ML-DSA-65</strong> (RFC 9881; ADR-0008), because no mainstream library supports composite X.509. The certificate's subject public key is the ML-DSA-65 component; the Ed25519 component is bound in a critical Warden extension, so the verifier can rebuild the composite receipt key.</li>
+  <li>Each key epoch has an X.509 certificate issued by a Warden root (ADR-0010, <code>internal/identity</code>) <span class="pill g">passing</span>. Certificates are signed with <strong>plain ML-DSA-65</strong> (RFC 9881; ADR-0008), because no mainstream library supports composite X.509. The certificate's subject public key is the ML-DSA-65 component; the Ed25519 component is carried in a SAN URI, <code>urn:warden:ed25519:&lt;base64url&gt;</code>, so the verifier can rebuild the composite receipt key. Purpose is fixed by a certificate policy under Warden's OID arc (<code>…4786.1</code> key epoch, <code>…4786.2</code> task credential). A critical extension was the original plan, but Go 1.27 cannot create or parse extensions under the 128-bit UUID OID; a missing Ed25519 key still cannot cause a downgrade, because every receipt needs both signature halves.</li>
+  <li>Task credentials are ML-DSA-65 certificates naming the agent, principal, and task in <code>urn:warden:</code> SAN URIs, valid for at most 15 minutes plus 1 minute of clock skew, with client-authentication key usage.</li>
   <li><strong>Rotation:</strong> a <code>key_rotation</code> receipt signed by the outgoing key names the incoming key; the incoming key signs the next receipt. Verification crosses the boundary.</li>
   <li><strong>Revocation:</strong> receipts under a revoked key dated after the revocation time fail verification; receipts before the last anchored checkpoint still verify.</li>
 </ul>
@@ -326,7 +328,7 @@ agent ◄──result (tagged)───┘</code></pre>
 <h2 id="questions">8. Open questions</h2>
 <ol class="steps">
   <li><s>Policy engine</s> — <strong>decided: Cedar</strong> (ADR-0007).</li>
-  <li><s>Certificate signatures</s> — <strong>decided: plain ML-DSA-65</strong> (ADR-0008), with the Ed25519 binding extension under the UUID-based OID <code>2.25.319797216735078154913038669087058524786</code>.</li>
+  <li><s>Certificate signatures</s> — <strong>decided: plain ML-DSA-65</strong> (ADR-0008). The UUID-based OID <code>2.25.319797216735078154913038669087058524786</code> is Warden's arc for certificate policies, and the Ed25519 key is bound by SAN URI (ADR-0010).</li>
   <li><strong>Draft churn.</strong> The composite draft is at -04. If the construction changes, the receipt <code>v</code> and <code>alg</code> must change with it. Is pinning <code>alg_ref</code> in the protected header enough?</li>
   <li><strong>SLH-DSA for checkpoints?</strong> Hash-based, larger and slower, more conservative — is there a case for using it for checkpoints only, since they are few and long-lived?</li>
   <li><strong>Checkpoint anchor for the demo.</strong> RFC 3161 needs a TSA; use a public TSA, or run a local one and document the trade-off?</li>
@@ -562,7 +564,7 @@ agent ◄──result (tagged)───┘</code></pre>
 </div>
 
 <div class="adr" id="adr8">
-  <h3>ADR-0008 — Plain ML-DSA-65 certificates; receipts stay hybrid <span class="pill g">Accepted</span></h3>
+  <h3>ADR-0008 — Plain ML-DSA-65 certificates; receipts stay hybrid <span class="pill g">Accepted</span> <span class="pill">Superseded in part by ADR-0010</span></h3>
   <p><strong>Decision.</strong> All certificate signatures use plain ML-DSA-65 (RFC 9881). Key-epoch certificates carry the ML-DSA-65 component as the subject public key and bind the Ed25519 component in a <strong>critical</strong> Warden extension; the verifier rebuilds the composite key and rejects certificates without it. The extension OID is the UUID-based <code>2.25.319797216735078154913038669087058524786</code> (ITU-T X.667), generated once and never to be regenerated.</p>
   <p><strong>Why.</strong> Composite X.509 is unsupported in Go 1.27, pyca <code>cryptography</code> 50.0.1, and OpenSSL 3.6.4; plain ML-DSA-65 certificates are supported and verified locally.</p>
   <p><strong>Consequences.</strong> Standard formats throughout. No classical hedge on the chain — limited by short-lived internal certificates, anchored checkpoints, and hybrid receipts. Generic tools will reject the unknown critical extension unless told to ignore it.</p>
@@ -575,6 +577,14 @@ agent ◄──result (tagged)───┘</code></pre>
   <p><strong>Rules checked by warden-verify.</strong> The approval must match an earlier <code>require_approval</code> decision; one approval per decision; the approver differs from the principal; a result needs an earlier <code>approved</code> outcome and must not be after <code>expires_ts</code>. New reasons: <code>duplicate_approval</code>, <code>self_approval</code>, <code>rejected_call_executed</code>, <code>approval_expired</code>.</p>
   <p><strong>Consequences.</strong> <code>missing_approval</code> becomes a real check. Approver keys are a second trust list. Expiry relies on Warden-written timestamps, bounded by anchored checkpoints.</p>
   <p><strong>Rejected.</strong> Warden-only approvals (only as trustworthy as Warden); approver signing the receipt itself (two signers in the chain); a web approval queue (UI work unrelated to the security claims).</p>
+</div>
+
+<div class="adr" id="adr10">
+  <h3>ADR-0010 — Identity and certificate profile <span class="pill g">Accepted</span></h3>
+  <p><strong>Context.</strong> Go 1.27 stores extension and extended-key-usage OIDs as <code>[]int</code>, so it cannot create a certificate extension under the 128-bit UUID OID, and <code>ParseCertificate</code> rejects any certificate carrying one. The same OID works fully as a certificate policy.</p>
+  <p><strong>Decision.</strong> The OID becomes Warden's arc: <code>.1</code> marks key-epoch certificates, <code>.2</code> task credentials, each as exactly one certificate policy. The Ed25519 key moves to a SAN URI, <code>urn:warden:ed25519:&lt;base64url&gt;</code>. Task credentials carry <code>urn:warden:agent</code>, <code>principal</code>, and <code>task</code> URIs, client-auth key usage, and at most 15 minutes of validity. Identity is read only from <code>urn:warden:</code> URIs, each exactly once; unknown Warden URIs and DNS, email, or IP names are rejected.</p>
+  <p><strong>Consequences.</strong> Every certificate is standard X.509. Dropping the critical flag does not allow a downgrade, because receipts need both signature halves. A task credential cannot pass as a key-epoch certificate, or the reverse. Revocation is still deferred.</p>
+  <p><strong>Rejected.</strong> An IANA Private Enterprise Number (waits on registration); hand-encoded certificates (reimplements X.509 parsing and validation).</p>
 </div>
 
 <div class="box warn">

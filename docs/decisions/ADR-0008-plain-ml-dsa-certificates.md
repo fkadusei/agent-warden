@@ -1,6 +1,9 @@
 # ADR-0008: Plain ML-DSA-65 certificates; receipts stay hybrid
 
-- **Status:** Accepted (2026-09-14, including the OID below)
+- **Status:** Accepted (2026-09-14); **superseded in part by ADR-0010** (2026-09-15).
+  Go 1.27 cannot create or parse extensions under the OID below, so the Ed25519
+  component moves to a SAN URI and the OID becomes Warden's arc for certificate
+  policies. Plain ML-DSA-65 certificate signatures are unchanged.
 - **Date:** 2026-09-14
 - **Related:** ADR-0002 (composite receipt signatures), ADR-0003, threats W11, W12;
   design §4.5
