@@ -80,8 +80,7 @@ signing, so the same receipt always produces the same bytes.
     "policy_revision": "sha256:4d5e…",
     "rule": "refund_over_limit",
     "taint": ["web:example.org"]
-  },
-  "key": "warden-2026-09-e1"
+  }
 }
 ```
 
@@ -94,9 +93,29 @@ signing, so the same receipt always produces the same bytes.
 | `args_commitment` / `result_commitment` | Salted digests, never raw data | W13 |
 | `policy_revision`, `rule` | Why it was allowed — reproducible against that policy version | W2 |
 | `taint` | Which untrusted sources were in context | W1 |
-| `key` | Which signing key epoch; resolves to a certificate | W11 |
+| `kid` (protected header, not the payload) | Which signing key epoch; resolves to a certificate | W11 |
 
 Receipt types: `decision`, `approval`, `result`, `key_rotation`, `checkpoint`.
+Implemented in `internal/receipt`: `decision` and `result`. The other three are
+reserved; their bodies are not specified yet, and receipts of those types are
+refused rather than accepted.
+
+A `result` receipt carries the same `task_id`, `actor`, and `call` as its decision,
+plus `result: {decision_seq, status, result_commitment, taint}`. `decision_seq` must
+be lower than the receipt's own `seq`; `result_commitment` is required when
+`status` is `ok`.
+
+**Format rules** (enforced on sign and verify):
+
+- Integers only; `seq` is at most 2^53 − 1, the largest integer JCS keeps exact.
+- `ts` has exactly one spelling: UTC with milliseconds, `2006-01-02T15:04:05.000Z`.
+- Digests are `sha256:` plus 64 lowercase hex characters.
+- **Strict decoding:** a payload, header, or log line is accepted only if it is
+  valid UTF-8, already canonical, and decoding then re-encoding it reproduces the
+  exact bytes. This rejects unknown or missing fields, duplicate keys, empty
+  arrays written instead of omitted, and numbers JCS would change. (The JCS
+  library used silently rounds integers above 2^53 and passes invalid UTF-8
+  through, so these checks are Warden's, not the library's.)
 
 ### 4.2 Commitments (ADR-0005)
 
@@ -115,8 +134,16 @@ $500?") from the receipt alone.
   message representative from the prefix, the algorithm label, a `0x00` byte, and
   the prehash; sign that representative with both ML-DSA-65 and Ed25519; concatenate
   the two signatures.
-- **Envelope:** JWS JSON serialization, with the receipt's `key` in the protected
-  header.
+- **Envelope:** flattened JWS JSON serialization, `{"payload", "protected",
+  "signature"}`, base64url without padding. The protected header is exactly
+  `{"alg":"ML-DSA-65-Ed25519","alg_ref":"draft-ietf-jose-pq-composite-sigs-04","crit":["alg_ref"],"kid":…}`.
+  Listing `alg_ref` in `crit` means a verifier that doesn't understand it must
+  reject the receipt. Any other header field is rejected.
+- **Signing input:** `protected || "." || payload` (the base64url strings), as in JWS.
+- **Log line:** the canonical JSON of the envelope, one per line. `prev` in the next
+  receipt is `sha256:` of that line.
+- **Verification order:** header checks, then signature, and only then is the
+  payload decoded. Unauthenticated payload bytes are never parsed.
 - **Size:** about 3,373 bytes of signature per receipt (3,309 ML-DSA-65 + 64
   Ed25519). The benchmark reports real storage and latency overhead.
 - **Library:** Go 1.27 standard library — `crypto/mldsa` and `crypto/ed25519`

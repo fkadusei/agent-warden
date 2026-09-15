@@ -185,8 +185,7 @@ agent ◄──result (tagged)───┘</code></pre>
     "policy_revision": "sha256:4d5e…",
     "rule": "refund_over_limit",
     "taint": ["web:example.org"]
-  },
-  "key": "warden-2026-09-e1"
+  }
 }</code></pre>
 <div class="table-wrap"><table>
   <thead><tr><th>Field</th><th>Purpose</th><th>Threat</th></tr></thead>
@@ -198,10 +197,16 @@ agent ◄──result (tagged)───┘</code></pre>
     <tr><td><code>args_commitment</code> / <code>result_commitment</code></td><td>Salted digests, never raw data</td><td>W13</td></tr>
     <tr><td><code>policy_revision</code>, <code>rule</code></td><td>Why it was allowed — reproducible against that policy version</td><td>W2</td></tr>
     <tr><td><code>taint</code></td><td>Which untrusted sources were in context</td><td>W1</td></tr>
-    <tr><td><code>key</code></td><td>Which signing key epoch; resolves to a certificate</td><td>W11</td></tr>
+    <tr><td><code>kid</code> (protected header, not the payload)</td><td>Which signing key epoch; resolves to a certificate</td><td>W11</td></tr>
   </tbody>
 </table></div>
-<p>Receipt types: <code>decision</code>, <code>approval</code>, <code>result</code>, <code>key_rotation</code>, <code>checkpoint</code>.</p>
+<p>Receipt types: <code>decision</code>, <code>approval</code>, <code>result</code>, <code>key_rotation</code>, <code>checkpoint</code>. Implemented in <code>internal/receipt</code>: <code>decision</code> and <code>result</code> <span class="pill g">passing</span>. The other three are reserved; their bodies are not specified yet, and receipts of those types are refused rather than accepted.</p>
+<p>A <code>result</code> receipt carries the same <code>task_id</code>, <code>actor</code>, and <code>call</code> as its decision, plus <code>result: {decision_seq, status, result_commitment, taint}</code>. <code>decision_seq</code> must be lower than the receipt's own <code>seq</code>; <code>result_commitment</code> is required when <code>status</code> is <code>ok</code>.</p>
+<div class="box info">
+  <span class="tag">Format rules (enforced on sign and verify)</span>
+  <p>Integers only; <code>seq</code> is at most 2<sup>53</sup> − 1, the largest integer JCS keeps exact. <code>ts</code> has exactly one spelling: UTC with milliseconds. Digests are <code>sha256:</code> plus 64 lowercase hex characters.</p>
+  <p><strong>Strict decoding:</strong> a payload, header, or log line is accepted only if it is valid UTF-8, already canonical, and decoding then re-encoding it reproduces the exact bytes. This rejects unknown or missing fields, duplicate keys, empty arrays written instead of omitted, and numbers JCS would change. The JCS library used silently rounds integers above 2<sup>53</sup> and passes invalid UTF-8 through, so these checks are Warden's, not the library's.</p>
+</div>
 
 <h3>4.2 Commitments (ADR-0005)</h3>
 <p><code>args_commitment = SHA-256(salt ‖ JCS(args))</code> with a fresh 32-byte random salt per call. The raw arguments and salt go to a separate, access-controlled store. To prove what one call contained, disclose that call's args and salt; the verifier recomputes the commitment. Salting prevents guessing low-entropy arguments ("was the amount $500?") from the receipt alone.</p>
@@ -210,7 +215,10 @@ agent ◄──result (tagged)───┘</code></pre>
 <ul>
   <li><strong>Algorithm:</strong> composite <strong>ML-DSA-65-Ed25519</strong> as defined in <code>draft-ietf-jose-pq-composite-sigs-04</code> (JOSE <code>alg</code> <code>ML-DSA-65-Ed25519</code>; COSE value requested as -58).</li>
   <li><strong>Construction (per the draft):</strong> prehash the message with SHA-512; build the message representative from the prefix, the algorithm label, a <code>0x00</code> byte, and the prehash; sign that representative with both ML-DSA-65 and Ed25519; concatenate the two signatures.</li>
-  <li><strong>Envelope:</strong> JWS JSON serialization, with the receipt's <code>key</code> in the protected header.</li>
+  <li><strong>Envelope:</strong> flattened JWS JSON serialization, <code>{"payload", "protected", "signature"}</code>, base64url without padding. The protected header is exactly <code>alg</code>, <code>alg_ref</code>, <code>crit: ["alg_ref"]</code>, and <code>kid</code>. Listing <code>alg_ref</code> in <code>crit</code> means a verifier that doesn't understand it must reject the receipt. Any other header field is rejected.</li>
+  <li><strong>Signing input:</strong> <code>protected || "." || payload</code> (the base64url strings), as in JWS.</li>
+  <li><strong>Log line:</strong> the canonical JSON of the envelope, one per line. <code>prev</code> in the next receipt is <code>sha256:</code> of that line.</li>
+  <li><strong>Verification order:</strong> header checks, then signature, and only then is the payload decoded. Unauthenticated payload bytes are never parsed.</li>
   <li><strong>Size:</strong> about 3,373 bytes of signature per receipt (3,309 ML-DSA-65 + 64 Ed25519). The benchmark reports real storage and latency overhead.</li>
   <li><strong>Library:</strong> Go 1.27 standard library — <code>crypto/mldsa</code> and <code>crypto/ed25519</code> (verified locally on Go 1.27.1: ML-DSA-65 signs and verifies, 3,309-byte signatures). Warden implements only the composite construction on top, and <strong>must pass the draft's test vectors</strong> before any receipt is produced (ADR-0006).</li>
   <li><strong>Test vectors:</strong> the draft's Appendix A.1 includes ML-DSA-65-Ed25519 (Figure 4) and ML-DSA-44-Ed25519 (Figure 2). Both are extracted unchanged into <code>testdata/composite/</code>, and <code>internal/composite</code> passes them <span class="pill g">passing</span>: public keys derived from the seeds, byte-exact M′, and verification of the published signatures.</li>
