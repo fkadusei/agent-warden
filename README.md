@@ -66,4 +66,4 @@ computer exists.
 
 ## License
 
-MIT (to be added with the first code).
+MIT — see [LICENSE](LICENSE).
