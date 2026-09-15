@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Warden — Design</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #fafaf8; --panel: #ffffff; --ink: #1d232e; --muted: #5d6573; --line: #e3e5ea;
+    --accent: #2f5fd0; --accent-soft: #edf2fd; --accent-line: #d3def8;
+    --green: #17703f; --green-soft: #e9f5ee; --green-line: #c8e6d3;
+    --amber: #8f6200; --amber-soft: #fdf6e3; --amber-line: #efdfb2;
+    --red: #b3261e; --red-soft: #fcecea; --red-line: #f3cdc8;
+    --code-bg: #f2f3f6; --pre-bg: #111827; --pre-ink: #e5e9f0;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #0e1116; --panel: #151a22; --ink: #e4e8ee; --muted: #9aa4b1; --line: #262d38;
+      --accent: #86aefc; --accent-soft: #17223a; --accent-line: #2a3d63;
+      --green: #62d09a; --green-soft: #12261d; --green-line: #244735;
+      --amber: #e2b447; --amber-soft: #29210f; --amber-line: #4a3c19;
+      --red: #ff8e85; --red-soft: #2a1614; --red-line: #532824;
+      --code-bg: #1b212b; --pre-bg: #0a0d12; --pre-ink: #e5e9f0;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16.5px/1.7 var(--sans); -webkit-font-smoothing: antialiased; }
+  .layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+  nav { position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 28px 18px; border-right: 1px solid var(--line); background: var(--panel); }
+  nav .brand { font-weight: 700; font-size: 15px; }
+  nav .brand span { display: block; color: var(--muted); font-weight: 500; font-size: 12.5px; }
+  nav h6 { margin: 20px 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  nav a { display: block; padding: 4px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13.5px; }
+  nav a:hover { background: var(--accent-soft); color: var(--accent); }
+  main { padding: 48px 56px 120px; max-width: 940px; }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 26px; margin-bottom: 36px; }
+  h1 { font-size: 34px; line-height: 1.2; margin: 0 0 10px; letter-spacing: -.02em; }
+  .lede { font-size: 19px; color: var(--muted); margin: 0; }
+  .meta { margin-top: 14px; font-size: 13.5px; color: var(--muted); }
+  h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 8px; letter-spacing: -.01em; scroll-margin-top: 16px; }
+  h2 .part { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-bottom: 2px; }
+  h3 { font-size: 19px; margin: 32px 0 8px; scroll-margin-top: 16px; }
+  a { color: var(--accent); }
+  code { font-family: var(--mono); font-size: .86em; background: var(--code-bg); padding: 1px 6px; border-radius: 5px; }
+  pre { background: var(--pre-bg); color: var(--pre-ink); padding: 16px 18px; border-radius: 10px; overflow-x: auto; font: 13px/1.55 var(--mono); }
+  pre code { background: none; padding: 0; font-size: inherit; color: inherit; }
+  .table-wrap { overflow-x: auto; margin: 16px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: var(--panel); }
+  td:first-child { white-space: nowrap; }
+  .box { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 14px 18px; margin: 18px 0; }
+  .box .tag { display: block; font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 4px; }
+  .box p { margin: 6px 0; }
+  .info { background: var(--accent-soft); border-color: var(--accent-line); } .info .tag { color: var(--accent); }
+  .ok { background: var(--green-soft); border-color: var(--green-line); } .ok .tag { color: var(--green); }
+  .warn { background: var(--amber-soft); border-color: var(--amber-line); } .warn .tag { color: var(--amber); }
+  .risk { background: var(--red-soft); border-color: var(--red-line); } .risk .tag { color: var(--red); }
+  .threat { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 14px 18px; margin: 14px 0; }
+  .threat h4 { margin: 0 0 6px; font-size: 16px; }
+  .threat h4 .id { font-family: var(--mono); color: var(--accent); margin-right: 6px; }
+  .threat p { margin: 5px 0; }
+  .threat .lbl { font-weight: 700; }
+  .adr { border-left: 3px solid var(--accent); padding: 4px 0 4px 18px; margin: 26px 0; }
+  .adr h3 { margin-top: 0; }
+  .pill { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 9px; border-radius: 99px; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent); vertical-align: middle; }
+  .pill.g { border-color: var(--green-line); background: var(--green-soft); color: var(--green); }
+  ol.steps li, ul li { margin: 4px 0; }
+  @media (max-width: 880px) {
+    .layout { grid-template-columns: 1fr; }
+    nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+    main { padding: 30px 20px 90px; }
+    td:first-child { white-space: normal; }
+  }
+  @media print { nav { display: none; } .layout { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav>
+  <div class="brand">Agent Warden<span>Design · draft for review</span></div>
+  <h6>Design</h6>
+  <a href="#idea">1. The idea</a>
+  <a href="#components">2. Components</a>
+  <a href="#lifecycle">3. Life of a tool call</a>
+  <a href="#receipt">4. The receipt</a>
+  <a href="#verify">5. What verify proves</a>
+  <a href="#benchmark">6. Benchmark</a>
+  <a href="#phases">7. Build phases</a>
+  <a href="#questions">8. Open questions</a>
+  <a href="#stack">9. Tech stack</a>
+  <h6>Threat model</h6>
+  <a href="#scope">Scope &amp; boundaries</a>
+  <a href="#enforcement">A. Enforcement (W1–W8)</a>
+  <a href="#evidence">B. Evidence (W9–W14)</a>
+  <a href="#outofscope">Out of scope</a>
+  <h6>Decisions</h6>
+  <a href="#adr1">ADR-0001 Scope</a>
+  <a href="#adr2">ADR-0002 Signatures</a>
+  <a href="#adr3">ADR-0003 Chain &amp; anchors</a>
+  <a href="#adr4">ADR-0004 Fail closed</a>
+  <a href="#adr5">ADR-0005 Commitments</a>
+  <a href="#adr6">ADR-0006 Tech stack</a>
+  <a href="#adr7">ADR-0007 Cedar</a>
+  <a href="#adr8">ADR-0008 Certificates</a>
+</nav>
+
+<main>
+<header>
+  <h1>Agent Warden</h1>
+  <p class="lede">A zero-trust enforcement layer for AI agent tool calls — with post-quantum signed receipts that prove what an agent did, for whom, and why it was allowed.</p>
+  <div class="meta">Status: design phase, no code yet · 2026-09-14 · Source: <code>docs/design.md</code>, <code>docs/threat-model.md</code>, <code>docs/decisions/</code></div>
+</header>
+
+<div class="box info">
+  <span class="tag">Why this exists</span>
+  <p>Agent audit logs today are, at best, HMAC-signed JSON. That proves nothing to anyone who doesn't hold the shared secret, and says nothing about whether entries were deleted. When an agent moves money or touches customer data, the record of what it did is <strong>evidence</strong> — and evidence needs integrity, origin, completeness, and a lifetime longer than classical signatures may last.</p>
+</div>
+
+<!-- ================= DESIGN ================= -->
+<h2 id="idea"><span class="part">Design</span>1. The idea in one paragraph</h2>
+<p>An agent proposes a tool call. Warden decides whether it happens, performs it with credentials the agent never sees, inspects what comes back, and — before and after — writes receipts. Each receipt is signed with a hybrid post-quantum signature and linked to the one before it. Periodically, Warden publishes a signed checkpoint to somewhere it doesn't control. Anyone with the public key and a checkpoint can run <code>warden-verify</code> and know that the record is authentic, in order, and complete up to that checkpoint.</p>
+
+<h2 id="components">2. Components</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Component</th><th>Job</th><th>Threats</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Gateway</strong></td><td>The only path from agent to tools. Speaks MCP to the agent.</td><td>W7</td></tr>
+    <tr><td><strong>Identity</strong></td><td>Issues a short-lived, task-scoped X.509 credential naming the agent, the principal, and the task. Expires with the task.</td><td>W3, W4</td></tr>
+    <tr><td><strong>Policy</strong></td><td>Deny-by-default decision on principal + agent + tool + arguments + taint state → <code>allow</code> / <code>deny</code> / <code>require_approval</code>.</td><td>W1, W2, W4</td></tr>
+    <tr><td><strong>Approvals</strong></td><td>Single-use approvals bound to a call digest and a distinct approver.</td><td>W6</td></tr>
+    <tr><td><strong>Credential broker</strong></td><td>Injects tool credentials at execution; the agent never holds them.</td><td>W3</td></tr>
+    <tr><td><strong>Tool registry</strong></td><td>Pins each tool manifest by digest.</td><td>W5</td></tr>
+    <tr><td><strong>Output inspector</strong></td><td>Tags results with a taint source; flags instruction-like content.</td><td>W1</td></tr>
+    <tr><td><strong>Receipt log</strong></td><td>Write-ahead, signed, hash-chained receipts.</td><td>W8, W9, W13, W14</td></tr>
+    <tr><td><strong>Checkpointer</strong></td><td>Signed checkpoints, sent to an external anchor.</td><td>W10, W11</td></tr>
+    <tr><td><strong>Signer</strong></td><td>Holds receipt signing keys behind an interface (file for dev; PKCS#11 / KMS for production).</td><td>W11, W12</td></tr>
+    <tr><td><strong><code>warden-verify</code></strong></td><td>Standalone offline verifier. Needs only public keys and checkpoints.</td><td>W9–W14</td></tr>
+    <tr><td><strong>Demo agent + tools</strong></td><td>A small agent and synthetic tools (email, payments, repo, CRM) for the demo and benchmark.</td><td>—</td></tr>
+  </tbody>
+</table></div>
+
+<h2 id="lifecycle">3. The life of one tool call</h2>
+<pre><code>agent ──propose(call)──► Gateway
+                           │ 1. identify   task credential → (agent, principal, task)
+                           │ 2. pin        tool manifest digest matches registry?
+                           │ 3. decide     policy(principal, agent, tool, args, taint)
+                           │ 4. RECEIPT    type=decision   ◄── durably written before anything runs
+                           │ 5. approve    if require_approval: wait for approval receipt
+                           │ 6. execute    broker injects tool credential, calls tool
+                           │ 7. inspect    tag result with taint source, flag instructions
+                           │ 8. RECEIPT    type=result
+agent ◄──result (tagged)───┘</code></pre>
+<div class="box ok">
+  <span class="tag">Write-ahead rule (ADR-0004)</span>
+  <p>Step 4 must succeed before step 6 may start. If the log is unavailable, the call is refused.</p>
+</div>
+
+<h2 id="receipt">4. The receipt</h2>
+<h3>4.1 Payload</h3>
+<p>Receipts are JSON, canonicalized with <strong>RFC 8785 (JCS)</strong> before hashing and signing, so the same receipt always produces the same bytes.</p>
+<pre><code>{
+  "v": 1,
+  "domain": "agent-warden/receipt/v1",
+  "chain_id": "01J9Z3…",
+  "seq": 1042,
+  "prev": "sha256:9f2c…",
+  "ts": "2026-09-14T15:04:05.123Z",
+  "type": "decision",
+  "task_id": "01J9Z4…",
+  "actor": { "agent": "cert-sha256:ab12…", "principal": "alice@tenant-a" },
+  "call": {
+    "tool": "payments.refund",
+    "manifest": "sha256:77e1…",
+    "args_commitment": "sha256:c0ff…"
+  },
+  "decision": {
+    "result": "require_approval",
+    "policy_revision": "sha256:4d5e…",
+    "rule": "refund_over_limit",
+    "taint": ["web:example.org"]
+  },
+  "key": "warden-2026-09-e1"
+}</code></pre>
+<div class="table-wrap"><table>
+  <thead><tr><th>Field</th><th>Purpose</th><th>Threat</th></tr></thead>
+  <tbody>
+    <tr><td><code>domain</code>, <code>chain_id</code>, <code>task_id</code></td><td>Prevent splicing a receipt into another chain or context</td><td>W14</td></tr>
+    <tr><td><code>seq</code>, <code>prev</code></td><td>Ordering and linkage; <code>prev</code> is the SHA-256 of the previous <strong>signed</strong> receipt</td><td>W9</td></tr>
+    <tr><td><code>actor</code></td><td>Who acted and for whom</td><td>W4</td></tr>
+    <tr><td><code>manifest</code></td><td>Which exact tool definition was called</td><td>W5</td></tr>
+    <tr><td><code>args_commitment</code> / <code>result_commitment</code></td><td>Salted digests, never raw data</td><td>W13</td></tr>
+    <tr><td><code>policy_revision</code>, <code>rule</code></td><td>Why it was allowed — reproducible against that policy version</td><td>W2</td></tr>
+    <tr><td><code>taint</code></td><td>Which untrusted sources were in context</td><td>W1</td></tr>
+    <tr><td><code>key</code></td><td>Which signing key epoch; resolves to a certificate</td><td>W11</td></tr>
+  </tbody>
+</table></div>
+<p>Receipt types: <code>decision</code>, <code>approval</code>, <code>result</code>, <code>key_rotation</code>, <code>checkpoint</code>.</p>
+
+<h3>4.2 Commitments (ADR-0005)</h3>
+<p><code>args_commitment = SHA-256(salt ‖ JCS(args))</code> with a fresh 32-byte random salt per call. The raw arguments and salt go to a separate, access-controlled store. To prove what one call contained, disclose that call's args and salt; the verifier recomputes the commitment. Salting prevents guessing low-entropy arguments ("was the amount $500?") from the receipt alone.</p>
+
+<h3>4.3 Signature (ADR-0002)</h3>
+<ul>
+  <li><strong>Algorithm:</strong> composite <strong>ML-DSA-65-Ed25519</strong> as defined in <code>draft-ietf-jose-pq-composite-sigs-04</code> (JOSE <code>alg</code> <code>ML-DSA-65-Ed25519</code>; COSE value requested as -58).</li>
+  <li><strong>Construction (per the draft):</strong> prehash the message with SHA-512; build the message representative from the prefix, the algorithm label, a <code>0x00</code> byte, and the prehash; sign that representative with both ML-DSA-65 and Ed25519; concatenate the two signatures.</li>
+  <li><strong>Envelope:</strong> JWS JSON serialization, with the receipt's <code>key</code> in the protected header.</li>
+  <li><strong>Size:</strong> about 3,373 bytes of signature per receipt (3,309 ML-DSA-65 + 64 Ed25519). The benchmark reports real storage and latency overhead.</li>
+  <li><strong>Library:</strong> Go 1.27 standard library — <code>crypto/mldsa</code> and <code>crypto/ed25519</code> (verified locally on Go 1.27.1: ML-DSA-65 signs and verifies, 3,309-byte signatures). Warden implements only the composite construction on top, and <strong>must pass the draft's test vectors</strong> before any receipt is produced (ADR-0006).</li>
+  <li><strong>Test vectors:</strong> the draft's Appendix A.1 includes ML-DSA-65-Ed25519 (Figure 4) and ML-DSA-44-Ed25519 (Figure 2). Both are extracted unchanged into <code>testdata/composite/</code>, and <code>internal/composite</code> passes them <span class="pill g">passing</span>: public keys derived from the seeds, byte-exact M′, and verification of the published signatures.</li>
+</ul>
+
+<h3>4.4 Chain and checkpoints (ADR-0003)</h3>
+<ul>
+  <li><strong>Genesis:</strong> <code>seq=0</code>, <code>prev</code> = SHA-256 of the chain's parameters (chain ID, algorithm, initial key certificate).</li>
+  <li><strong>Checkpoint:</strong> every <em>N</em> receipts or <em>T</em> seconds (whichever first), Warden signs <code>{chain_id, size, root}</code> where <code>root</code> is a Merkle root over receipt hashes. The Merkle root lets a verifier later prove that one receipt is in the log without downloading all of it.</li>
+  <li><strong>Anchoring:</strong> each checkpoint is sent to an external anchor. v1 supports a write-once file target and an RFC 3161 timestamp token; a witness network is future work.</li>
+  <li><strong>Exposure window:</strong> receipts after the last anchored checkpoint are not truncation-proof (W10 residual risk). Default <em>N</em>=100, <em>T</em>=60s, both configurable.</li>
+</ul>
+
+<h3>4.5 Keys</h3>
+<ul>
+  <li>Receipt signing keys are held only by the Signer, never by the agent.</li>
+  <li>Each key epoch has an X.509 certificate issued by a Warden root, with a dedicated extended key usage for receipt signing. Certificates are signed with <strong>plain ML-DSA-65</strong> (RFC 9881; ADR-0008), because no mainstream library supports composite X.509. The certificate's subject public key is the ML-DSA-65 component; the Ed25519 component is bound in a critical Warden extension, so the verifier can rebuild the composite receipt key.</li>
+  <li><strong>Rotation:</strong> a <code>key_rotation</code> receipt signed by the outgoing key names the incoming key; the incoming key signs the next receipt. Verification crosses the boundary.</li>
+  <li><strong>Revocation:</strong> receipts under a revoked key dated after the revocation time fail verification; receipts before the last anchored checkpoint still verify.</li>
+</ul>
+
+<h2 id="verify">5. What <code>warden-verify</code> proves</h2>
+<pre><code>warden-verify --log receipts.jsonl --trust root.pem --checkpoint anchored.json</code></pre>
+<div class="table-wrap"><table>
+  <thead><tr><th>It proves</th><th>It does not prove</th></tr></thead>
+  <tbody>
+    <tr><td style="white-space:normal">Each receipt was signed by a Warden key chained to the trusted root</td><td>That the Warden host was uncompromised at signing time</td></tr>
+    <tr><td style="white-space:normal">No receipt was altered, inserted, deleted, or reordered</td><td>That the tool internally did what it reported</td></tr>
+    <tr><td style="white-space:normal">The log is complete up to the anchored checkpoint</td><td>Completeness after the last anchored checkpoint</td></tr>
+    <tr><td style="white-space:normal">Both signature components are valid (no downgrade)</td><td>That the policy itself was a good policy</td></tr>
+    <tr><td style="white-space:normal">A disclosed argument or result matches its commitment</td><td>Anything about calls whose data was not disclosed</td></tr>
+  </tbody>
+</table></div>
+<p>On failure it names the first failing <code>seq</code> and the reason: <code>bad_signature</code>, <code>chain_break</code>, <code>seq_gap</code>, <code>revoked_key</code>, <code>checkpoint_mismatch</code>, <code>wrong_chain</code>.</p>
+
+<h2 id="benchmark">6. Benchmark</h2>
+<p>The number that goes in the README: attack success rate <strong>without</strong> Warden vs. <strong>with</strong> Warden, over the same scenarios, same model, same tools.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Category</th><th>Examples</th><th>Maps to</th></tr></thead>
+  <tbody>
+    <tr><td><code>injection</code></td><td>Planted instructions in a web page, email, README, ticket</td><td>W1</td></tr>
+    <tr><td><code>authz</code></td><td>Tools or argument ranges outside the principal's role</td><td>W2</td></tr>
+    <tr><td><code>exfil</code></td><td>Credential disclosure, sending data to external recipients</td><td>W3</td></tr>
+    <tr><td><code>deputy</code></td><td>Another principal's content driving this task</td><td>W4</td></tr>
+    <tr><td><code>poison</code></td><td>Malicious tool descriptions, changed manifests</td><td>W5</td></tr>
+    <tr><td><code>approval</code></td><td>No approval, self-approval, replayed approval</td><td>W6</td></tr>
+    <tr><td><code>evidence</code></td><td>Tamper, truncate, rewrite, splice, downgrade</td><td>W9–W14</td></tr>
+    <tr><td><code>benign</code></td><td>Legitimate tasks that should succeed</td><td>False-positive rate</td></tr>
+  </tbody>
+</table></div>
+<p><strong>Metrics:</strong> attack success rate, <strong>benign task completion rate</strong> (a guard that blocks everything is useless), added latency per call (p50/p99), receipt bytes per call. Target size: 30–40 attack scenarios plus 10–15 benign tasks. Results are published with the model name and version, because they change with the model.</p>
+
+<h2 id="phases">7. Build phases</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Phase</th><th>Deliverable</th><th>Gate</th></tr></thead>
+  <tbody>
+    <tr><td><strong>0</strong> <span class="pill g">done</span></td><td>This design, the threat model, ADRs 0001–0008</td><td>Owner review</td></tr>
+    <tr><td><strong>1</strong></td><td>Receipt library: JCS, composite signer, chain, commitments, <code>warden-verify</code></td><td>Draft test vectors pass; all <code>evidence/*</code> tamper tests fail verification as expected</td></tr>
+    <tr><td><strong>2</strong></td><td>Gateway: identity, policy, approvals, broker, registry, write-ahead receipts</td><td><code>authz</code>, <code>approval</code>, <code>poison</code>, fail-closed tests pass</td></tr>
+    <tr><td><strong>3</strong></td><td>Output inspector + demo agent + synthetic tools</td><td><code>injection</code>, <code>exfil</code>, <code>deputy</code> scenarios run end to end</td></tr>
+    <tr><td><strong>4</strong></td><td>Benchmark run with/without Warden; checkpoints + anchoring</td><td>Published results table incl. benign completion</td></tr>
+    <tr><td><strong>5</strong></td><td>README, demo video, write-up</td><td>—</td></tr>
+  </tbody>
+</table></div>
+
+<h2 id="questions">8. Open questions</h2>
+<ol class="steps">
+  <li><s>Policy engine</s> — <strong>decided: Cedar</strong> (ADR-0007).</li>
+  <li><s>Certificate signatures</s> — <strong>decided: plain ML-DSA-65</strong> (ADR-0008). Still open within it: the OID arc for the Ed25519 binding extension.</li>
+  <li><strong>Draft churn.</strong> The composite draft is at -04. If the construction changes, the receipt <code>v</code> and <code>alg</code> must change with it. Is pinning <code>alg_ref</code> in the protected header enough?</li>
+  <li><strong>SLH-DSA for checkpoints?</strong> Hash-based, larger and slower, more conservative — is there a case for using it for checkpoints only, since they are few and long-lived?</li>
+  <li><strong>Checkpoint anchor for the demo.</strong> RFC 3161 needs a TSA; use a public TSA, or run a local one and document the trade-off?</li>
+</ol>
+
+<h2 id="stack">9. Tech stack (ADR-0006)</h2>
+<p><strong>Split by component:</strong> Go for everything on the trust path (receipts, verifier, gateway); Python for the demo agent, synthetic tools, and benchmark. The two sides meet only at MCP and at the receipt format (JSON + JCS + JWS), which is language-neutral.</p>
+
+<h3>Go 1.27 — trust path</h3>
+<div class="table-wrap"><table>
+  <thead><tr><th>Layer</th><th>Choice</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>ML-DSA-65, Ed25519, SHA-2</td><td>Standard library <code>crypto/mldsa</code>, <code>crypto/ed25519</code>, <code>crypto/sha512</code></td><td><span class="pill g">verified</span> locally on Go 1.27.1</td></tr>
+    <tr><td>X.509</td><td>Standard library <code>crypto/x509</code></td><td><span class="pill g">verified</span> ML-DSA-65 certificates</td></tr>
+    <tr><td>Composite ML-DSA-65-Ed25519</td><td>Written in Warden</td><td>No library implements it; gated on draft test vectors</td></tr>
+    <tr><td>JWS envelope</td><td>Minimal JWS JSON serialization, written in Warden</td><td>Mainstream JOSE libraries lack composite algorithms</td></tr>
+    <tr><td>JCS (RFC 8785)</td><td><code>github.com/gowebpki/jcs</code> v1.0.1</td><td>To vet against RFC 8785 test data</td></tr>
+    <tr><td>Merkle tree / checkpoints</td><td>Written in Warden, RFC 9162 hashing rules</td><td>Small, fully tested</td></tr>
+    <tr><td>RFC 3161 timestamps</td><td><code>github.com/digitorus/timestamp</code></td><td>No tagged release; to vet, or write the client</td></tr>
+    <tr><td>Receipt + commitment stores</td><td>SQLite via <code>modernc.org/sqlite</code> v1.58.0</td><td>Pure Go, no cgo — keeps <code>warden-verify</code> a single static binary</td></tr>
+    <tr><td>MCP</td><td><code>github.com/modelcontextprotocol/go-sdk</code> v1.8.0</td><td>Official SDK</td></tr>
+    <tr><td>Policy engine</td><td>Cedar via <code>cedar-go</code> v1.8.0</td><td>ADR-0007; two-action pattern for require_approval</td></tr>
+    <tr><td>CLI</td><td>Standard library <code>flag</code></td><td>No dependency for <code>warden-verify</code></td></tr>
+    <tr><td>Signer</td><td>Interface: file keys for dev; PKCS#11 later</td><td>HSM support for ML-DSA varies by vendor</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Python 3.13+ — demo and benchmark</h3>
+<div class="table-wrap"><table>
+  <thead><tr><th>Layer</th><th>Choice</th></tr></thead>
+  <tbody>
+    <tr><td>Demo agent</td><td>An MCP-capable agent framework; model still to be chosen</td></tr>
+    <tr><td>Synthetic tools</td><td>MCP servers built with the official MCP Python SDK</td></tr>
+    <tr><td>Benchmark harness</td><td>pytest scenarios; results as JSON, rendered into the README table</td></tr>
+    <tr><td>Environments</td><td>uv</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Quality and supply chain</h3>
+<div class="table-wrap"><table>
+  <thead><tr><th>Area</th><th>Go</th><th>Python</th></tr></thead>
+  <tbody>
+    <tr><td>Tests</td><td><code>go test</code>, native fuzzing for tamper and parser tests</td><td>pytest</td></tr>
+    <tr><td>Static analysis</td><td><code>go vet</code>, <code>staticcheck</code>, <code>govulncheck</code></td><td>ruff, mypy</td></tr>
+    <tr><td>CI</td><td colspan="2">GitHub Actions pinned to commit SHAs, gitleaks, Semgrep</td></tr>
+    <tr><td>Release</td><td>Reproducible <code>warden-verify</code> binaries for macOS, Linux, Windows</td><td>—</td></tr>
+  </tbody>
+</table></div>
+
+<!-- ================= THREAT MODEL ================= -->
+<h2 id="scope"><span class="part">Threat model</span>Scope and trust boundaries</h2>
+<p>Warden's job is to let an AI agent use tools <strong>without trusting the model</strong>, and to leave behind a record of every action that <strong>a third party can verify without trusting Warden's operator</strong>. Each threat lists the mitigation and the test that will prove it. Nothing is implemented yet; the tests are the acceptance criteria for the build.</p>
+
+<h3>Assets</h3>
+<div class="table-wrap"><table>
+  <thead><tr><th>Asset</th><th>Why it matters</th></tr></thead>
+  <tbody>
+    <tr><td>Tool capabilities</td><td>Email, payments, repos, databases — misuse causes real-world harm</td></tr>
+    <tr><td>Tool credentials</td><td>Theft gives an attacker the agent's reach, without the agent</td></tr>
+    <tr><td>The receipt log</td><td>The only evidence of what happened; must survive disputes and audits</td></tr>
+    <tr><td>Receipt signing keys</td><td>Whoever holds them can write history</td></tr>
+    <tr><td>Data in arguments/results</td><td>May contain personal or confidential data</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Actors</h3>
+<div class="table-wrap"><table>
+  <thead><tr><th>Actor</th><th>Trust</th></tr></thead>
+  <tbody>
+    <tr><td>Human principal</td><td>Authenticated; may be malicious toward other tenants</td></tr>
+    <tr><td>Agent (LLM + runtime)</td><td><strong>Untrusted.</strong> It proposes actions; it never decides them</td></tr>
+    <tr><td>Content the agent reads</td><td><strong>Untrusted.</strong> Web pages, emails, files, tool output may contain instructions aimed at the model</td></tr>
+    <tr><td>Tool servers</td><td>Trusted to execute honestly; <em>tool descriptions</em> are not trusted</td></tr>
+    <tr><td>Approver</td><td>Authenticated human; must not be the requester</td></tr>
+    <tr><td>Warden</td><td>Trusted at runtime (see out of scope)</td></tr>
+    <tr><td>Verifier</td><td>Auditor, regulator, counterparty — holds only public keys and published checkpoints</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Trust boundaries</h3>
+<pre><code> untrusted                     │ enforcement                 │ trusted execution
+                               │                             │
+ content ─► Agent (LLM) ──────►│  WARDEN                     │──► Tool servers
+                               │  identify → authorize →     │
+ principal ─► delegation ─────►│  approve → execute →        │
+                               │  inspect → RECEIPT          │
+                               │            │                │
+                               │            ▼                │
+                               │   receipt log ─► checkpoints ─► external anchor
+                                                                    │
+                                              Verifier ◄────────────┘ (public keys only)</code></pre>
+
+<h2 id="enforcement">Part A — Enforcement threats</h2>
+
+<div class="threat"><h4><span class="id">W1</span>Prompt injection through tool output</h4>
+<p><span class="lbl">Threat.</span> A web page, email, or file returned by a tool contains instructions that steer the model's next action.</p>
+<p><span class="lbl">Mitigation.</span> Policy, not detection, is the guarantee: the model only proposes, and every call is authorized on identity, delegation, and policy. Warden also <strong>marks tool output as tainted</strong> by source; while tainted content is in context, policy can raise sensitive actions to <em>require approval</em>. Instruction-like content is flagged for the receipt, but detection is heuristic and never the sole control.</p>
+<p><span class="lbl">Test.</span> Benchmark <code>injection/*</code>: planted instructions; the harmful follow-on call is denied or held, and the receipt records the taint source.</p></div>
+
+<div class="threat"><h4><span class="id">W2</span>Out-of-policy tool call</h4>
+<p><span class="lbl">Threat.</span> The agent calls a tool or argument range the principal is not entitled to.</p>
+<p><span class="lbl">Mitigation.</span> Deny by default. Policy evaluates principal, agent identity, tool, and arguments (amount limits, recipient domains).</p>
+<p><span class="lbl">Test.</span> Benchmark <code>authz/*</code>: calls outside the matrix are denied, each with a <code>decision=deny</code> receipt.</p></div>
+
+<div class="threat"><h4><span class="id">W3</span>Credential theft from the agent</h4>
+<p><span class="lbl">Threat.</span> The agent is compromised or talked into printing its environment.</p>
+<p><span class="lbl">Mitigation.</span> <strong>The agent holds no tool credentials.</strong> Warden injects them at execution time. The agent holds only a short-lived, task-scoped credential useless without Warden.</p>
+<p><span class="lbl">Test.</span> Instruct the agent to reveal credentials; assert none exist in its environment or config, and the task credential expires on schedule.</p></div>
+
+<div class="threat"><h4><span class="id">W4</span>Confused deputy</h4>
+<p><span class="lbl">Threat.</span> The agent uses its authority on behalf of someone other than the principal.</p>
+<p><span class="lbl">Mitigation.</span> Every call is bound to one task and one principal; policy evaluates the principal's entitlements, never the agent's aggregate reach.</p>
+<p><span class="lbl">Test.</span> Content authored by principal B drives an action in A's task that only B could perform — denied.</p></div>
+
+<div class="threat"><h4><span class="id">W5</span>Tool poisoning and rug pulls</h4>
+<p><span class="lbl">Threat.</span> A tool description instructs the model to do harm, or a tool definition changes after approval.</p>
+<p><span class="lbl">Mitigation.</span> Manifests are pinned by digest; a changed manifest is refused until re-approved. Every receipt records the manifest digest.</p>
+<p><span class="lbl">Test.</span> Modify a registered tool's description; calls are refused and receipted.</p></div>
+
+<div class="threat"><h4><span class="id">W6</span>Approval bypass or forged approval</h4>
+<p><span class="lbl">Threat.</span> A high-risk action runs without approval, is self-approved, or reuses an old approval.</p>
+<p><span class="lbl">Mitigation.</span> Gated calls execute only against an approval receipt naming the exact call digest, a distinct approver, and an expiry. Single-use.</p>
+<p><span class="lbl">Test.</span> No approval; self-approval; reused approval for a different amount — all refused.</p></div>
+
+<div class="threat"><h4><span class="id">W7</span>Warden bypass</h4>
+<p><span class="lbl">Threat.</span> The agent calls a tool server directly.</p>
+<p><span class="lbl">Mitigation.</span> Tools accept only Warden-injected credentials; network policy allows tool egress only from Warden.</p>
+<p><span class="lbl">Test.</span> From the agent's network position, call a tool directly — refused.</p></div>
+
+<div class="threat"><h4><span class="id">W8</span>Fail-open under failure</h4>
+<p><span class="lbl">Threat.</span> Policy, approvals, or the receipt log is down and calls proceed unrecorded.</p>
+<p><span class="lbl">Mitigation.</span> <strong>Fail closed.</strong> A call executes only after its decision receipt is durably written.</p>
+<p><span class="lbl">Test.</span> Make the receipt store read-only; calls are refused, not executed.</p></div>
+
+<h2 id="evidence">Part B — Evidence threats</h2>
+
+<div class="threat"><h4><span class="id">W9</span>Receipt tampering</h4>
+<p><span class="lbl">Threat.</span> Receipts are edited, inserted, deleted, or reordered to change the story.</p>
+<p><span class="lbl">Mitigation.</span> Each receipt is signed and carries <code>seq</code> and the previous receipt's hash. Edits break signatures; insertions, deletions, and reorders break the chain.</p>
+<p><span class="lbl">Test.</span> <code>warden-verify</code> fails and names the first bad <code>seq</code> for a flipped byte, an inserted receipt, a deleted receipt, and a swapped pair.</p></div>
+
+<div class="threat"><h4><span class="id">W10</span>Truncation, rollback, and forked history</h4>
+<p><span class="lbl">Threat.</span> A hash chain alone can't reveal that the newest receipts were cut off, that the key holder rewrote and re-signed the whole log, or that different verifiers were shown different histories.</p>
+<p><span class="lbl">Mitigation.</span> Signed checkpoints (log size + root hash) sent <strong>outside Warden's control</strong> — a witness, write-once store, or RFC 3161 timestamp authority.</p>
+<p><span class="lbl">Test.</span> Truncate after an anchored checkpoint; rewrite and re-sign the whole log with the real key — both fail against the anchored checkpoint.</p>
+<div class="box risk"><span class="tag">Residual risk</span><p>Receipts written after the last anchored checkpoint can be truncated undetectably. The checkpoint interval is the exposure window — a stated, tunable parameter.</p></div></div>
+
+<div class="threat"><h4><span class="id">W11</span>Signing key compromise</h4>
+<p><span class="lbl">Threat.</span> An attacker obtains a signing key and forges or rewrites history.</p>
+<p><span class="lbl">Mitigation.</span> Key lives only in Warden behind a signer interface supporting hardware custody; short epochs; rotation signed by old and new keys; anchored checkpoints bound the damage; revoked-key receipts after revocation are rejected.</p>
+<p><span class="lbl">Test.</span> Rotate mid-log and verify across the boundary; forge a post-revocation receipt with a revoked key — rejected.</p></div>
+
+<div class="threat"><h4><span class="id">W12</span>Harvest now, forge later</h4>
+<p><span class="lbl">Threat.</span> Receipts must stay trustworthy for years; a future quantum computer could forge classical signatures, making an Ed25519-only log deniable.</p>
+<p><span class="lbl">Mitigation.</span> Hybrid <strong>ML-DSA-65 + Ed25519</strong> composite signatures — unforgeable as long as either component holds.</p>
+<p><span class="lbl">Test.</span> Verification fails if either component is altered or stripped (no downgrade).</p></div>
+
+<div class="threat"><h4><span class="id">W13</span>Sensitive data leaking into receipts</h4>
+<p><span class="lbl">Threat.</span> Receipts are shared with verifiers, but arguments and results contain personal or confidential data.</p>
+<p><span class="lbl">Mitigation.</span> Receipts hold salted <strong>commitments</strong>, never raw values; raw data and salts are stored separately and disclosed selectively.</p>
+<p><span class="lbl">Test.</span> Scan all benchmark receipts for seeded synthetic PII and secrets — none; a selectively disclosed call verifies against its commitment.</p></div>
+
+<div class="threat"><h4><span class="id">W14</span>Replay across contexts</h4>
+<p><span class="lbl">Threat.</span> A valid receipt or approval from one chain, task, or deployment is presented in another.</p>
+<p><span class="lbl">Mitigation.</span> Every signed payload includes chain ID, task ID, and a domain-separation label; the composite scheme adds its own algorithm label.</p>
+<p><span class="lbl">Test.</span> Splice a receipt from chain A into chain B — rejected.</p></div>
+
+<h2 id="outofscope">Out of scope (documented, not hidden)</h2>
+<ul>
+  <li><strong>A compromised Warden host at signing time.</strong> Warden will faithfully sign what a compromised Warden tells it to. Confidential computing and remote attestation of Warden are future work.</li>
+  <li><strong>Proving the tool actually did what it reported.</strong> Receipts prove what Warden authorized, sent, and received.</li>
+  <li><strong>Prompt-injection detection accuracy.</strong> Heuristics are reported honestly, including false positives; policy is the control.</li>
+  <li><strong>Model-level jailbreak research.</strong> Warden constrains actions, not model outputs.</li>
+  <li><strong>Cross-organization key federation.</strong></li>
+</ul>
+
+<!-- ================= ADRs ================= -->
+<h2><span class="part">Decisions</span>Architecture decision records</h2>
+
+<div class="adr" id="adr1">
+  <h3>ADR-0001 — A self-contained gateway, receipt log, and benchmark <span class="pill g">Accepted</span></h3>
+  <p><strong>Decision.</strong> One self-contained repository with (1) the gateway — identity, policy, approvals, credential brokering, tool pinning, output inspection; (2) the receipt library and <code>warden-verify</code>, with no dependency on the gateway; (3) a demo agent and synthetic tools so everything runs with no infrastructure beyond a model endpoint. Identity is deliberately minimal: a small internal CA issuing short-lived, task-scoped X.509 credentials.</p>
+  <p><strong>Why.</strong> Warden must show prevention, verifiable evidence, and measurable results — each needs a different piece, and all must be reproducible on a laptop.</p>
+  <p><strong>Rejected.</strong> Receipt library only (can't show enforcement or run the benchmark); gateway with conventional logging (loses the main contribution); a full identity stack (heavy setup obscures the core ideas).</p>
+</div>
+
+<div class="adr" id="adr2">
+  <h3>ADR-0002 — Hybrid composite ML-DSA-65 + Ed25519 signatures <span class="pill">Proposed</span></h3>
+  <p><strong>Decision.</strong> Sign receipts with composite <code>ML-DSA-65-Ed25519</code> per <code>draft-ietf-jose-pq-composite-sigs-04</code> in a JWS envelope, pinning the draft revision in the protected header (<code>alg_ref</code>). Build on the Go standard library's ML-DSA-65 and Ed25519 primitives, implement only the composite construction, gate it on the draft's test vectors. Both components required; no single-component fallback.</p>
+  <p><strong>Why.</strong> Receipts are long-lived evidence (W12). ML-DSA is standardized (FIPS 204; JOSE/COSE encoding published as RFC 9964) but young; a hybrid holds if either algorithm breaks.</p>
+  <p><strong>Consequences.</strong> ~3.4 KB per receipt. If the draft changes, bump the receipt version; old receipts stay verifiable under their pinned <code>alg_ref</code>. ML-DSA-65 alone (RFC 9964) is the fallback as a new version, never a silent downgrade.</p>
+  <p><strong>Rejected.</strong> Ed25519 only; ML-DSA-65 only; unbound dual signatures; SLH-DSA per receipt (too large/slow; still considered for checkpoints); HMAC logs (only secret holders can verify, and any can forge).</p>
+</div>
+
+<div class="adr" id="adr3">
+  <h3>ADR-0003 — Hash chain, signed checkpoints, external anchoring <span class="pill">Proposed</span></h3>
+  <p><strong>Decision.</strong> Chain receipts with <code>seq</code> + <code>prev</code>; every <em>N</em> receipts or <em>T</em> seconds sign a checkpoint <code>{chain_id, size, root}</code> over a Merkle tree; anchor each checkpoint outside Warden's control (write-once file or RFC 3161 in v1); verify against the most recent anchor and report the exposure window.</p>
+  <p><strong>Why.</strong> Per-receipt signatures prove authenticity, not completeness. A chain alone misses truncation, full rewrites by the key holder, and forks.</p>
+  <p><strong>Consequences.</strong> Tampering before the last anchor is detectable even with the key. The window after it (default 100 receipts / 60 s) is named, not hidden. Anchor outages degrade evidence strength but don't stop tool calls.</p>
+  <p><strong>Rejected.</strong> Chain only; a public transparency log per receipt (leaks metadata, adds latency — possible future target for checkpoints); blockchain anchoring.</p>
+</div>
+
+<div class="adr" id="adr4">
+  <h3>ADR-0004 — Fail closed with write-ahead receipts <span class="pill">Proposed</span></h3>
+  <p><strong>Decision.</strong> No receipt, no action. A call runs only after its <code>decision</code> receipt is durably written; on write failure the call is refused. A missing <code>result</code> receipt after execution is detectable and alerts.</p>
+  <p><strong>Why.</strong> Best-effort audit pipelines drop events exactly when something is already going wrong.</p>
+  <p><strong>Consequences.</strong> Receipt storage is on the availability path — an outage stops tool use, intentionally. Signing and fsync add per-call latency, measured in the benchmark.</p>
+  <p><strong>Rejected.</strong> Async best-effort logging; writing only after execution (a crash leaves no record).</p>
+</div>
+
+<div class="adr" id="adr5">
+  <h3>ADR-0005 — Commitments, not raw data, in receipts <span class="pill">Proposed</span></h3>
+  <p><strong>Decision.</strong> <code>commitment = SHA-256(salt ‖ JCS(value))</code> with a fresh 32-byte salt per value. Raw values and salts are stored separately under access control and disclosed selectively.</p>
+  <p><strong>Why.</strong> Receipts are meant to be shared; raw data would make every verifier a data recipient, and plain redaction can't prove what a call contained.</p>
+  <p><strong>Consequences.</strong> Share receipts widely; prove one call without revealing others; delete value + salt for retention obligations and the receipt still verifies. The separate data store becomes a new asset to protect.</p>
+  <p><strong>Rejected.</strong> Raw values; unsalted hashes (brute-forceable); HMAC (reintroduces a shared secret); encrypting values inside receipts.</p>
+</div>
+
+<div class="adr" id="adr6">
+  <h3>ADR-0006 — Go for the trust path, Python for the demo and benchmark <span class="pill g">Accepted</span></h3>
+  <p><strong>Decision.</strong> Go 1.27 for the receipt library, composite signer, chain and checkpoints, <code>warden-verify</code>, and the gateway. Python 3.13+ for the demo agent, synthetic tools, and benchmark. The two sides interact only through MCP and the language-neutral receipt format. Prefer Go's standard library for all cryptography.</p>
+  <p><strong>Why.</strong> The trust path needs correctness, few dependencies, low latency, and a verifier auditors can run without an environment. The demo and benchmark need speed of development and the agent ecosystem. Go 1.27 now has ML-DSA and ML-DSA X.509 in the standard library (verified locally); neither Go nor Python implements composite signatures.</p>
+  <p><strong>Consequences.</strong> <code>warden-verify</code> ships as a single static binary (requires pure-Go SQLite). Compiler-checked crypto code; a FIPS 140-3 mode is available (<code>crypto/mldsa</code> needs Go Cryptographic Module v1.26.0+). Two toolchains, slower prototyping, and cross-language tests are required.</p>
+  <p><strong>Rejected.</strong> All Python (verifier needs an environment, weaker gateway latency, more trust-path dependencies); all Go (demo and benchmark far from the agent ecosystem); Rust for the trust path (less mature ML-DSA and MCP ecosystem, steeper build).</p>
+</div>
+
+<div class="adr" id="adr7">
+  <h3>ADR-0007 — Cedar for tool-call authorization <span class="pill g">Accepted</span></h3>
+  <p><strong>Decision.</strong> Embed Cedar via <code>cedar-go</code>. Entities: principal, agent, tool, task; context: validated arguments, taint sources, approval state. Default deny, <code>forbid</code> overrides <code>permit</code>. Because Cedar returns only allow/deny, Warden evaluates two actions: <code>call</code> denied → <strong>deny</strong>; <code>call_unattended</code> allowed → <strong>allow</strong>; otherwise <strong>require_approval</strong>. Receipts record the policy set digest and determining policy IDs.</p>
+  <p><strong>Why.</strong> Authorization-specific language that is easier to audit; <code>forbid</code>-wins semantics express limits that must never be overridden.</p>
+  <p><strong>Consequences.</strong> The two-action pattern needs explicit tests. Which schema-validation and analysis features <code>cedar-go</code> supports must be checked before Phase 2. Complex data joins must be computed by the gateway before evaluation.</p>
+  <p><strong>Rejected.</strong> OPA/Rego (more flexible than needed, harder to audit); hand-written Go rules (policy changes become code changes).</p>
+</div>
+
+<div class="adr" id="adr8">
+  <h3>ADR-0008 — Plain ML-DSA-65 certificates; receipts stay hybrid <span class="pill">Proposed</span></h3>
+  <p><strong>Decision.</strong> All certificate signatures use plain ML-DSA-65 (RFC 9881). Key-epoch certificates carry the ML-DSA-65 component as the subject public key and bind the Ed25519 component in a <strong>critical</strong> Warden extension; the verifier rebuilds the composite key and rejects certificates without it. The extension OID needs an arc Warden controls; until then it is a test-only placeholder.</p>
+  <p><strong>Why.</strong> Composite X.509 is unsupported in Go 1.27, pyca <code>cryptography</code> 50.0.1, and OpenSSL 3.6.4; plain ML-DSA-65 certificates are supported and verified locally.</p>
+  <p><strong>Consequences.</strong> Standard formats throughout. No classical hedge on the chain — limited by short-lived internal certificates, anchored checkpoints, and hybrid receipts. Generic tools will reject the unknown critical extension unless told to ignore it.</p>
+  <p><strong>Rejected.</strong> Hand-built composite certificates; parallel ML-DSA-65 + Ed25519 certificates; a JSON key manifest instead of X.509; a non-critical extension (allows silent downgrade).</p>
+</div>
+
+<div class="box warn">
+  <span class="tag">Before implementation</span>
+  <p>The composite signature construction above is summarized from the draft. Check it against the full text of <code>draft-ietf-jose-pq-composite-sigs-04</code> and its test vectors before writing Phase 1 code.</p>
+</div>
+
+</main>
+</div>
+</body>
+</html>

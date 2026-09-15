@@ -1,0 +1,30 @@
+# Secrets and keys — never committed
+.env
+*.pem
+*.key
+!testdata/**/*.pem
+keys/
+
+# Receipt logs and stores produced locally
+*.db
+*.db-wal
+*.db-shm
+*.jsonl
+!testdata/**/*.jsonl
+
+# Go
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Python (demo and benchmark)
+.venv/
+__pycache__/
+.pytest_cache/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
