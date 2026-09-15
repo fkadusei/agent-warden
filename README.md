@@ -130,7 +130,8 @@ policy makes every attack scenario fail.
   truncation, full rewrites by the key holder, and forked histories.
 - **`warden-verify`:** checks all of the above offline, from public keys alone.
 - **Enforcement pipeline (`internal/gateway`):** every call is checked against a
-  short-lived task credential, a pinned tool manifest, and Cedar policy; the decision
+  short-lived task credential, a pinned tool manifest, the manifest's input schema
+  (ADR-0013), and Cedar policy; the decision
   is receipted before anything runs; high-risk calls wait for an approver's signed
   statement; tool credentials are injected by Warden and scrubbed from results;
   untrusted output taints the task.

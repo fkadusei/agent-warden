@@ -153,6 +153,7 @@
 <pre><code>agent ──propose(call)──► Gateway
                            │ 1. identify   task credential → (agent, principal, task)
                            │ 2. pin        tool manifest digest matches registry?
+                           │    check      args fit the pinned input schema? (ADR-0013)
                            │ 3. decide     policy(principal, agent, tool, args, taint)
                            │ 4. RECEIPT    type=decision   ◄── durably written before anything runs
                            │ 5. approve    if require_approval: wait for approval receipt
@@ -163,7 +164,7 @@ agent ◄──result (tagged)───┘</code></pre>
 <div class="box ok">
   <span class="tag">Write-ahead rule (ADR-0004)</span>
   <p>Step 4 must succeed before step 6 may start. If the log is unavailable, the call is refused.</p>
-  <p><strong>Implemented in <code>internal/gateway</code></strong> <span class="pill g">passing</span> as <code>Call</code>, <code>Pending</code>, <code>Approve</code>, and <code>Resume</code>. A rejected credential or unreachable tool server returns an error with no receipt. Unpinned or changed tools are denied (<code>tool_unpinned</code>, <code>tool_changed</code>), invalid arguments too (<code>invalid_input</code>), and nothing runs. Approved calls run only via <code>Resume</code> with a matching credential before the approval expires, and the manifest is re-checked just before execution. A result receipt that can't be written withholds the result. <code>go run ./cmd/warden-demo</code> runs a 13-step scenario and writes a log for <code>warden-verify</code>.</p>
+  <p><strong>Implemented in <code>internal/gateway</code></strong> <span class="pill g">passing</span> as <code>Call</code>, <code>Pending</code>, <code>Approve</code>, and <code>Resume</code>. A rejected credential or unreachable tool server returns an error with no receipt. Unpinned or changed tools are denied (<code>tool_unpinned</code>, <code>tool_changed</code>), as are arguments that don't fit the pinned input schema (<code>invalid_arguments</code>, ADR-0013) and arguments policy can't evaluate (<code>invalid_input</code>), and nothing runs. Approved calls run only via <code>Resume</code> with a matching credential before the approval expires, and the manifest is re-checked just before execution. A result receipt that can't be written withholds the result. <code>go run ./cmd/warden-demo</code> runs a 13-step scenario and writes a log for <code>warden-verify</code>.</p>
 </div>
 
 <h2 id="receipt">4. The receipt</h2>

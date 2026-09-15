@@ -196,7 +196,12 @@ func renderResponse(resp *gateway.Response, err error) *mcp.CallToolResult {
 		if resp.Rule == "" {
 			return text(true, "Denied by Warden: no policy permits this call. Decision receipt #%d.", resp.DecisionSeq)
 		}
-		return text(true, "Denied by Warden (rule %q). Decision receipt #%d.", resp.Rule, resp.DecisionSeq)
+		msg := fmt.Sprintf("Denied by Warden (rule %q). Decision receipt #%d.", resp.Rule, resp.DecisionSeq)
+		if resp.Rule == gateway.RuleInvalidArguments && resp.Detail != "" {
+			// The agent sent these arguments, so the reason reveals nothing new and lets it correct them.
+			msg += " " + resp.Detail
+		}
+		return text(true, "%s", msg)
 	case gateway.StatusPending:
 		return text(true, "This call needs human approval (rule %q). Decision receipt #%d. Once it is approved, call %s with {\"decision_seq\": %d}.",
 			resp.Rule, resp.DecisionSeq, ResumeTool, resp.DecisionSeq)

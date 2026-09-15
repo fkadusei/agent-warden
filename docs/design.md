@@ -40,6 +40,7 @@ that checkpoint.
 agent ──propose(call)──► Gateway
                            │ 1. identify   task credential → (agent, principal, task)
                            │ 2. pin        tool manifest digest matches registry?
+                           │    check      args fit the pinned input schema? (ADR-0013)
                            │ 3. decide     policy(principal, agent, tool, args, taint)
                            │ 4. RECEIPT    type=decision   ◄── durably written before anything runs
                            │ 5. approve    if require_approval: wait for approval receipt
@@ -57,7 +58,9 @@ the log is unavailable, the call is refused.
 - A rejected task credential, or a tool server that can't describe the tool, returns an
   error with **no receipt**, because the request can't be attributed or described.
 - Unpinned or changed tools are denied with rule `tool_unpinned` or `tool_changed`;
-  invalid arguments with `invalid_input`. Every denial is receipted and nothing runs.
+  arguments that don't fit the pinned input schema (or a schema that can't be used)
+  with `invalid_arguments` (ADR-0013); arguments policy can't evaluate with
+  `invalid_input`. Every denial is receipted and nothing runs.
 - Arguments and results are committed, and their openings stored, before the receipt
   that carries the commitment is written.
 - Approved calls run only through `Resume`, with a credential for the same agent,

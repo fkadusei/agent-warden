@@ -73,8 +73,9 @@ approval, and that the receipt records the taint source.
 
 **Threat.** The agent (by error or manipulation) calls a tool or an argument range
 the principal is not entitled to.
-**Mitigation.** Deny by default. Policy is evaluated on the principal, the agent
-identity, the tool, and the arguments (e.g. amount limits, recipient domains).
+**Mitigation.** Deny by default. Arguments must first fit the tool's pinned input
+schema (ADR-0013); then policy is evaluated on the principal, the agent identity, the
+tool, and the arguments (e.g. amount limits, recipient domains).
 **Test.** Benchmark category `authz/*`: calls outside the matrix are denied, and a
 `decision=deny` receipt exists for each.
 

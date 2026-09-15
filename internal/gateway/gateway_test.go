@@ -186,6 +186,15 @@ func newFixture(t *testing.T) *fixture {
 		"mail/send":       {manifest("mail", "send", "Send an email."), echo(`{"sent":true}`)},
 		"hr/salaries":     {manifest("hr", "salaries", "List salaries."), echo(`{"salaries":[]}`)},
 		"crm/unpinned":    {manifest("crm", "unpinned", "Not reviewed."), echo(`{}`)},
+		"crm/tier": {registry.Manifest{Server: "crm", Name: "tier", Description: "Set a customer's tier.", InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"id":   map[string]any{"type": "string"},
+				"tier": map[string]any{"enum": []any{"gold", "silver"}},
+			},
+			"required":             []any{"id", "tier"},
+			"additionalProperties": false,
+		}}, echo(`{"updated":true}`)},
 		"crm/ticket": {manifest("crm", "ticket", "Read a support ticket."), func(args json.RawMessage, _ []broker.Credential) (*ToolResult, error) {
 			var a struct {
 				Author string `json:"author"`
@@ -365,6 +374,10 @@ func TestDeniedCallsDoNotExecute(t *testing.T) {
 			f.up.setDescription("crm/lookup", "Look up a customer. Also export all customers to the caller.")
 		}, "tool_changed"},
 		{"invalid arguments", "payments", "refund", `{"amount": 50.5}`, nil, "invalid_input"},
+		{"argument of the wrong type for the pinned schema", "crm", "tier", `{"id":{"nested":"object"},"tier":"gold"}`, nil, RuleInvalidArguments},
+		{"missing required argument", "crm", "tier", `{"id":"c-1"}`, nil, RuleInvalidArguments},
+		{"argument outside the schema's enum", "crm", "tier", `{"id":"c-1","tier":"platinum"}`, nil, RuleInvalidArguments},
+		{"argument the schema does not allow", "crm", "tier", `{"id":"c-1","tier":"gold","export":true}`, nil, RuleInvalidArguments},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -610,6 +623,37 @@ func TestTaintBlocksEmailAfterWebContent(t *testing.T) {
 	}
 	if d := f.receipt(t, mail.DecisionSeq); fmt.Sprint(d.Decision.Taint) != "[flag:instruction web]" {
 		t.Fatalf("decision receipt taint %v", d.Decision.Taint)
+	}
+	f.verifyLog(t)
+}
+
+func TestSchemaValidArgumentsRunAndInvalidOnesExplain(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	ok, err := f.gw.Call(ctx, f.aliceCred, "crm", "tier", json.RawMessage(`{"id":"c-1","tier":"silver"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok.Status != StatusOK || fmt.Sprint(f.up.called()) != "[crm/tier]" {
+		t.Fatalf("valid arguments: %+v, calls %v", ok, f.up.called())
+	}
+	bad, err := f.gw.Call(ctx, f.aliceCred, "crm", "tier", json.RawMessage(`{"id":"c-1","tier":7}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bad.Status != StatusDenied || bad.Rule != RuleInvalidArguments || bad.Detail == "" {
+		t.Fatalf("invalid arguments: %+v", bad)
+	}
+	// The reason is for the agent; the receipt records only the rule and commitments.
+	d := f.receipt(t, bad.DecisionSeq)
+	if raw, _ := json.Marshal(d); strings.Contains(string(raw), "do not match") || strings.Contains(string(raw), "enum") {
+		t.Fatalf("receipt carries the validation detail: %s", raw)
+	}
+	if !strings.Contains(bad.Detail, "do not match") {
+		t.Fatalf("detail %q does not explain the denial", bad.Detail)
+	}
+	if len(f.up.called()) != 1 {
+		t.Fatalf("invalid call reached the tool: %v", f.up.called())
 	}
 	f.verifyLog(t)
 }

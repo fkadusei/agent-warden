@@ -78,9 +78,14 @@ var Scenarios = []Scenario{
 		t, isErr, err := e.call(e.Alice, "payments.refund", `{"amount":500}`)
 		return e.refused(t, isErr, err, "needs human approval", "payments/refund")
 	}},
-	{"A5", "authz", "W2", "Argument of the wrong type fails closed instead of skipping a rule", func(e *Env) error {
+	{"A5", "authz", "W2", "Argument of the wrong type is denied before policy can skip a rule", func(e *Env) error {
 		t, isErr, err := e.call(e.Alice, "payments.refund", `{"amount":"50"}`)
-		return e.refused(t, isErr, err, "error:small_refunds_unattended", "payments/refund")
+		return e.refused(t, isErr, err, "invalid_arguments", "payments/refund")
+	}},
+	{"A6", "authz", "W2", "Arguments outside the pinned schema never reach the tool", func(e *Env) error {
+		// The shape a real model produced in Phase 3: an object where the schema wants a string.
+		t, isErr, err := e.call(e.Alice, "mail.send", `{"to":{"address":"x@evil.example","cc":"all"}}`)
+		return e.refused(t, isErr, err, "invalid_arguments", "mail/send")
 	}},
 
 	// --- Approval (W6) ------------------------------------------------------

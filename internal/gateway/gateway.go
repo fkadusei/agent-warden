@@ -21,11 +21,13 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/fkadusei/agent-warden/internal/approval"
+	"github.com/fkadusei/agent-warden/internal/argschema"
 	"github.com/fkadusei/agent-warden/internal/broker"
 	"github.com/fkadusei/agent-warden/internal/canonical"
 	"github.com/fkadusei/agent-warden/internal/commit"
@@ -149,6 +151,8 @@ type Gateway struct {
 	mu      sync.Mutex
 	pending map[int64]*pending
 	taint   map[string][]string // task -> taint labels
+	// validators caches compiled input schemas by manifest digest.
+	validators sync.Map
 }
 
 // New checks cfg and returns a gateway.
@@ -251,6 +255,12 @@ func (g *Gateway) Call(ctx context.Context, credential []byte, server, tool stri
 		return nil, err
 	}
 
+	// Arguments must fit the reviewed schema before policy sees them (ADR-0013).
+	var argErr error
+	if regErr == nil {
+		argErr = g.checkArgs(manifestDigest, m.InputSchema, canonArgs)
+	}
+
 	taint := g.taintOf(task.Task)
 	var dec policy.Decision
 	switch {
@@ -260,6 +270,9 @@ func (g *Gateway) Call(ctx context.Context, credential []byte, server, tool stri
 		dec = policy.Decision{Result: receipt.Deny, Rule: "tool_changed", PolicyRevision: g.cfg.Policy.Revision()}
 	case regErr != nil:
 		return nil, fmt.Errorf("%w: %v", ErrUpstream, regErr)
+	case argErr != nil:
+		dec = policy.Decision{Result: receipt.Deny, Rule: RuleInvalidArguments, PolicyRevision: g.cfg.Policy.Revision(),
+			Errors: []string{argErr.Error()}}
 	default:
 		var roles []string
 		if g.cfg.Roles != nil {
@@ -292,7 +305,7 @@ func (g *Gateway) Call(ctx context.Context, credential []byte, server, tool stri
 	case receipt.Deny:
 		resp.Status = StatusDenied
 		if len(dec.Errors) > 0 {
-			resp.Detail = fmt.Sprint(dec.Errors)
+			resp.Detail = strings.Join(dec.Errors, "; ")
 		}
 		return resp, nil
 	case receipt.RequireApproval:
@@ -304,6 +317,24 @@ func (g *Gateway) Call(ctx context.Context, credential []byte, server, tool stri
 	default:
 		return g.execute(ctx, p, resp)
 	}
+}
+
+// RuleInvalidArguments denies calls whose arguments do not fit the pinned input
+// schema, or whose schema cannot be used (ADR-0013).
+const RuleInvalidArguments = "invalid_arguments"
+
+// checkArgs validates arguments against the pinned schema, compiling it once per
+// manifest digest. An unusable schema is an error, so the call is denied.
+func (g *Gateway) checkArgs(manifestDigest string, schema any, args json.RawMessage) error {
+	if cached, ok := g.validators.Load(manifestDigest); ok {
+		return cached.(*argschema.Validator).Validate(args)
+	}
+	v, err := argschema.Compile(schema)
+	if err != nil {
+		return err
+	}
+	g.validators.Store(manifestDigest, v)
+	return v.Validate(args)
 }
 
 // PendingCall is what an approver is shown.
