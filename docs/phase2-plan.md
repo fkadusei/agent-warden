@@ -16,7 +16,7 @@ comes last, so every security decision is testable without a protocol in the way
 | 2.1 | **Durable write-ahead receipt store** | `internal/store` | W8, W9 | Phase 1 |
 | 2.2 | **Tool registry** — pin each tool manifest by digest; refuse changed manifests | `internal/registry` | W5 | 2.1 |
 | 2.3 | **Policy** — Cedar, two-action pattern, `policy_revision` = digest of the policy set | `internal/policy` | W1, W2, W4 | — |
-| 2.4 | **Approvals** — approval receipts, single-use, distinct approver, bound to the call and an expiry | `internal/approval` | W6 | 2.1, **ADR-0009** |
+| 2.4 ✅ | **Approvals** — approval receipts, single-use, distinct approver, bound to the call and an expiry. The `warden approve` CLI moves to 2.7–2.8, since it needs the running gateway to list and submit pending decisions | `internal/approval` | W6 | 2.1, **ADR-0009** |
 | 2.5 | **Identity** — short-lived task credentials (plain ML-DSA-65 X.509) naming agent, principal, and task | `internal/identity` | W3, W4 | **OID decision** |
 | 2.6 | **Credential broker** — inject tool credentials at execution; the agent never holds them | `internal/broker` | W3 | 2.5 |
 | 2.7 | **Enforcement pipeline** — identify → pin → decide → receipt → approve → execute → inspect → receipt, as a plain Go API | `internal/gateway` | all of the above | 2.1–2.6 |

@@ -33,6 +33,11 @@ const (
 	ReasonDeniedCallExecuted Reason = "denied_call_executed"
 	ReasonMissingApproval    Reason = "missing_approval"
 	ReasonCheckpointMismatch Reason = "checkpoint_mismatch"
+	// Approval rules (ADR-0009).
+	ReasonDuplicateApproval    Reason = "duplicate_approval"
+	ReasonSelfApproval         Reason = "self_approval"
+	ReasonRejectedCallExecuted Reason = "rejected_call_executed"
+	ReasonApprovalExpired      Reason = "approval_expired"
 )
 
 // maxLine bounds a single log line. A receipt line is a few kilobytes.
@@ -80,6 +85,11 @@ type decisionInfo struct {
 	call     receipt.Call
 	result   receipt.DecisionResult
 	resulted bool
+	approval *receipt.Approval
+}
+
+func (d *decisionInfo) sameCall(r *receipt.Receipt) bool {
+	return d.taskID == r.TaskID && d.actor == *r.Actor && d.call == *r.Call
 }
 
 // Verify reads a receipt log and checks every line in order: encoding,
@@ -167,20 +177,40 @@ func VerifyWithCheckpoints(log io.Reader, chainID string, keys KeyResolver, cps 
 		switch r.Type {
 		case receipt.TypeDecision:
 			decisions[seq] = &decisionInfo{taskID: r.TaskID, actor: *r.Actor, call: *r.Call, result: r.Decision.Result}
+		case receipt.TypeApproval:
+			a := r.Approval
+			d := decisions[a.DecisionSeq]
+			switch {
+			case d == nil || d.result != receipt.RequireApproval:
+				return nil, fail(ReasonBadReference, "decision_seq %d is not a require_approval decision in this log", a.DecisionSeq)
+			case !d.sameCall(r):
+				return nil, fail(ReasonBadReference, "task, actor, or call differs from decision %d", a.DecisionSeq)
+			case d.approval != nil:
+				return nil, fail(ReasonDuplicateApproval, "decision %d already has an approval", a.DecisionSeq)
+			case d.resulted:
+				return nil, fail(ReasonBadReference, "decision %d already has a result", a.DecisionSeq)
+			case a.Approver == d.actor.Principal:
+				return nil, fail(ReasonSelfApproval, "principal %q approved their own call", a.Approver)
+			}
+			copied := *a
+			d.approval = &copied
 		case receipt.TypeResult:
 			d := decisions[r.Result.DecisionSeq]
 			switch {
 			case d == nil:
 				return nil, fail(ReasonBadReference, "decision_seq %d is not a decision in this log", r.Result.DecisionSeq)
-			case d.taskID != r.TaskID || d.actor != *r.Actor || d.call != *r.Call:
+			case !d.sameCall(r):
 				return nil, fail(ReasonBadReference, "task, actor, or call differs from decision %d", r.Result.DecisionSeq)
 			case d.resulted:
 				return nil, fail(ReasonDuplicateResult, "decision %d already has a result", r.Result.DecisionSeq)
 			case d.result == receipt.Deny:
 				return nil, fail(ReasonDeniedCallExecuted, "decision %d was deny", r.Result.DecisionSeq)
-			case d.result == receipt.RequireApproval:
-				// Approval receipts are not specified yet, so no approval can be shown.
-				return nil, fail(ReasonMissingApproval, "decision %d required approval", r.Result.DecisionSeq)
+			case d.result == receipt.RequireApproval && d.approval == nil:
+				return nil, fail(ReasonMissingApproval, "decision %d required approval and has none", r.Result.DecisionSeq)
+			case d.result == receipt.RequireApproval && d.approval.Outcome != receipt.Approved:
+				return nil, fail(ReasonRejectedCallExecuted, "decision %d was rejected by %q", r.Result.DecisionSeq, d.approval.Approver)
+			case d.result == receipt.RequireApproval && r.TS > d.approval.ExpiresTS:
+				return nil, fail(ReasonApprovalExpired, "result at %s is after the approval expired at %s", r.TS, d.approval.ExpiresTS)
 			}
 			d.resulted = true
 		}

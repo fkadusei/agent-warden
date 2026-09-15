@@ -201,7 +201,7 @@ agent ◄──result (tagged)───┘</code></pre>
     <tr><td><code>kid</code> (protected header, not the payload)</td><td>Which signing key epoch; resolves to a certificate</td><td>W11</td></tr>
   </tbody>
 </table></div>
-<p>Receipt types: <code>decision</code>, <code>approval</code>, <code>result</code>, <code>key_rotation</code>, <code>checkpoint</code>. Implemented in <code>internal/receipt</code>: <code>decision</code> and <code>result</code> <span class="pill g">passing</span>. <code>approval</code> is specified in ADR-0009 (implementation: Phase 2 step 2.4); <code>key_rotation</code> and <code>checkpoint</code> are reserved. Until implemented, receipts of those types are refused rather than accepted. Checkpoints (§4.4) turned out not to need a receipt type: they are separate signed statements, kept outside the log.</p>
+<p>Receipt types: <code>decision</code>, <code>approval</code>, <code>result</code>, <code>key_rotation</code>, <code>checkpoint</code>. Implemented in <code>internal/receipt</code>: <code>decision</code> and <code>result</code> <span class="pill g">passing</span>. <code>approval</code> (ADR-0009) is implemented too. <code>key_rotation</code> and <code>checkpoint</code> are reserved; until implemented, receipts of those types are refused rather than accepted. Checkpoints (§4.4) turned out not to need a receipt type: they are separate signed statements, kept outside the log.</p>
 <p>A <code>result</code> receipt carries the same <code>task_id</code>, <code>actor</code>, and <code>call</code> as its decision, plus <code>result: {decision_seq, status, result_commitment, taint}</code>. <code>decision_seq</code> must be lower than the receipt's own <code>seq</code>; <code>result_commitment</code> is required when <code>status</code> is <code>ok</code>.</p>
 <div class="box info">
   <span class="tag">Format rules (enforced on sign and verify)</span>
@@ -278,7 +278,11 @@ agent ◄──result (tagged)───┘</code></pre>
     <tr><td><code>bad_reference</code></td><td>Result points at something that isn't a matching earlier decision (same task, actor, and call)</td></tr>
     <tr><td><code>duplicate_result</code></td><td>A decision already has a result</td></tr>
     <tr><td><code>denied_call_executed</code></td><td>A result exists for a <code>deny</code> decision</td></tr>
-    <tr><td><code>missing_approval</code></td><td>A result exists for a <code>require_approval</code> decision (approval receipts not yet specified, so none can be shown)</td></tr>
+    <tr><td><code>missing_approval</code></td><td>A result exists for a <code>require_approval</code> decision with no earlier approval</td></tr>
+    <tr><td><code>rejected_call_executed</code></td><td>A result exists for a decision whose approval outcome was <code>rejected</code></td></tr>
+    <tr><td><code>approval_expired</code></td><td>The result's <code>ts</code> is after the approval's <code>expires_ts</code></td></tr>
+    <tr><td><code>duplicate_approval</code></td><td>A decision already has an approval</td></tr>
+    <tr><td><code>self_approval</code></td><td>The approver is the principal who requested the call</td></tr>
     <tr><td><code>checkpoint_mismatch</code></td><td>The log is shorter than an anchored checkpoint, its prefix hashes differently, or the checkpoint is for another chain</td></tr>
   </tbody>
 </table></div>

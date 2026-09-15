@@ -90,3 +90,28 @@ signs the statement with the approver's key, and submits it. No web UI in Phase 
   complicates verification; a separate statement keeps receipts uniform.
 - **Web approval queue** — nicer for a real deployment, but UI work unrelated to the
   security claims being demonstrated.
+
+## Implementation notes (2026-09-15, Phase 2 step 2.4)
+
+- **Receipt:** `internal/receipt` accepts `approval` receipts. Validation requires the
+  task, actor, and call; a `decision_seq` earlier than the receipt; a known outcome;
+  a statement digest; and an `expires_ts` later than the receipt's own `ts`.
+- **Statements:** `internal/approval` signs and verifies statements. The key ID must
+  equal the statement's `approver`, so an approver cannot sign in someone else's name.
+  Statements, receipts, and checkpoints share one envelope; tests confirm none is
+  accepted as another.
+- **`approval.Accept`** turns a verified statement into an approval receipt only if
+  it answers a `require_approval` decision on the same chain, `seq`, and call digest;
+  the approver is not the principal; the statement's `ts` is not more than one minute
+  in the future; its expiry is at most one hour after its `ts` (`DefaultLimits`);
+  and it has not expired by Warden's clock. The receipt's `ts` is Warden's clock.
+- **Storage:** `internal/store` keeps signed statements in a separate table keyed by
+  the digest of their canonical line, and refuses to return a row whose content no
+  longer matches its digest.
+- **Verification:** `internal/chain` enforces the five rules above, adding
+  `duplicate_approval`, `self_approval`, `rejected_call_executed`, and
+  `approval_expired`. An approval for a decision that already has a result is a
+  `bad_reference`. A rejected decision with no result verifies.
+- **Deferred:** the `warden approve` CLI (Phase 2 steps 2.7–2.8, once the gateway can
+  list and accept pending decisions), and checking approver signatures from
+  `warden-verify`.

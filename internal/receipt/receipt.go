@@ -52,11 +52,19 @@ const (
 	StatusError ResultStatus = "error"
 )
 
+// ApprovalOutcome is the approver's answer to a require_approval decision.
+type ApprovalOutcome string
+
+const (
+	Approved ApprovalOutcome = "approved"
+	Rejected ApprovalOutcome = "rejected"
+)
+
 var (
 	// ErrInvalid wraps every receipt validation failure.
 	ErrInvalid = errors.New("receipt: invalid")
 	// ErrUnsupportedType is returned for receipt types whose bodies are not
-	// specified yet (approval, key_rotation, checkpoint).
+	// specified yet (key_rotation, checkpoint).
 	ErrUnsupportedType = errors.New("receipt: type not yet specified")
 )
 
@@ -75,6 +83,7 @@ type Receipt struct {
 	Call     *Call     `json:"call,omitempty"`
 	Decision *Decision `json:"decision,omitempty"`
 	Result   *Result   `json:"result,omitempty"`
+	Approval *Approval `json:"approval,omitempty"`
 }
 
 // Actor records who acted and on whose behalf (threat W4).
@@ -104,6 +113,16 @@ type Result struct {
 	Status           ResultStatus `json:"status"`
 	ResultCommitment string       `json:"result_commitment,omitempty"`
 	Taint            []string     `json:"taint,omitempty"`
+}
+
+// Approval answers a require_approval decision (ADR-0009).
+type Approval struct {
+	DecisionSeq int64           `json:"decision_seq"`
+	Outcome     ApprovalOutcome `json:"outcome"`
+	Approver    string          `json:"approver"`
+	// Statement is the digest of the approver's own signed statement.
+	Statement string `json:"statement"`
+	ExpiresTS string `json:"expires_ts"`
 }
 
 func invalid(format string, a ...any) error {
@@ -137,19 +156,27 @@ func (r *Receipt) Validate() error {
 		if err := r.validateCallContext(); err != nil {
 			return err
 		}
-		if r.Result != nil {
-			return invalid("decision receipt has a result section")
+		if r.Result != nil || r.Approval != nil {
+			return invalid("decision receipt has a result or approval section")
 		}
 		return r.Decision.validate()
 	case TypeResult:
 		if err := r.validateCallContext(); err != nil {
 			return err
 		}
-		if r.Decision != nil {
-			return invalid("result receipt has a decision section")
+		if r.Decision != nil || r.Approval != nil {
+			return invalid("result receipt has a decision or approval section")
 		}
 		return r.Result.validate(r.Seq)
-	case TypeApproval, TypeKeyRotation, TypeCheckpoint:
+	case TypeApproval:
+		if err := r.validateCallContext(); err != nil {
+			return err
+		}
+		if r.Decision != nil || r.Result != nil {
+			return invalid("approval receipt has a decision or result section")
+		}
+		return r.Approval.validate(r.Seq, r.TS)
+	case TypeKeyRotation, TypeCheckpoint:
 		return fmt.Errorf("%w: %s", ErrUnsupportedType, r.Type)
 	default:
 		return invalid("unknown type %q", r.Type)
@@ -219,6 +246,35 @@ func (res *Result) validate(seq int64) error {
 		return invalid("unknown result status %q", res.Status)
 	}
 	return validTaint("result.taint", res.Taint)
+}
+
+func (a *Approval) validate(seq int64, ts string) error {
+	if a == nil {
+		return invalid("missing approval")
+	}
+	if a.DecisionSeq < 0 || a.DecisionSeq >= seq {
+		return invalid("approval.decision_seq %d must precede seq %d", a.DecisionSeq, seq)
+	}
+	switch a.Outcome {
+	case Approved, Rejected:
+	default:
+		return invalid("unknown approval outcome %q", a.Outcome)
+	}
+	if err := validID("approval.approver", a.Approver); err != nil {
+		return err
+	}
+	if !digest.Valid(a.Statement) {
+		return invalid("approval.statement is not a sha256 digest")
+	}
+	exp, err := time.Parse(TimeFormat, a.ExpiresTS)
+	if err != nil || exp.UTC().Format(TimeFormat) != a.ExpiresTS {
+		return invalid("approval.expires_ts %q is not in %s", a.ExpiresTS, TimeFormat)
+	}
+	// TimeFormat has a fixed width, so string order is time order.
+	if a.ExpiresTS <= ts {
+		return invalid("approval.expires_ts must be after the receipt's ts")
+	}
+	return nil
 }
 
 func validTaint(field string, taint []string) error {

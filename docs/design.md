@@ -96,10 +96,9 @@ signing, so the same receipt always produces the same bytes.
 | `kid` (protected header, not the payload) | Which signing key epoch; resolves to a certificate | W11 |
 
 Receipt types: `decision`, `approval`, `result`, `key_rotation`, `checkpoint`.
-Implemented in `internal/receipt`: `decision` and `result`. `approval` is specified
-in ADR-0009 (implementation: Phase 2 step 2.4); `key_rotation` and `checkpoint` are
-reserved. Until implemented, receipts of those types are refused rather than
-accepted. Checkpoints (§4.4) turned out not to need a receipt
+Implemented in `internal/receipt`: `decision`, `result`, and `approval` (ADR-0009).
+`key_rotation` and `checkpoint` are reserved; until implemented, receipts of those
+types are refused rather than accepted. Checkpoints (§4.4) turned out not to need a receipt
 type: they are separate signed statements, kept outside the log.
 
 A `result` receipt carries the same `task_id`, `actor`, and `call` as its decision,
@@ -251,7 +250,11 @@ Implemented in `internal/chain.Verify`:
 | `bad_reference` | Result points at something that isn't a matching earlier decision (same task, actor, and call) |
 | `duplicate_result` | A decision already has a result |
 | `denied_call_executed` | A result exists for a `deny` decision |
-| `missing_approval` | A result exists for a `require_approval` decision (approval receipts not yet specified, so none can be shown) |
+| `missing_approval` | A result exists for a `require_approval` decision with no earlier approval |
+| `rejected_call_executed` | A result exists for a decision whose approval outcome was `rejected` |
+| `approval_expired` | The result's `ts` is after the approval's `expires_ts` |
+| `duplicate_approval` | A decision already has an approval |
+| `self_approval` | The approver is the principal who requested the call |
 | `checkpoint_mismatch` | The log is shorter than an anchored checkpoint, its prefix hashes differently, or the checkpoint is for another chain |
 
 Still to come: `revoked_key` (with certificates). On success, the report also lists

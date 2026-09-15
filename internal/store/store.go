@@ -33,7 +33,14 @@ CREATE TABLE IF NOT EXISTS receipts (
 	hash TEXT NOT NULL,
 	ts   TEXT NOT NULL
 ) STRICT;
+CREATE TABLE IF NOT EXISTS statements (
+	digest TEXT PRIMARY KEY,
+	line   BLOB NOT NULL
+) STRICT;
 `
+
+// ErrNotFound is returned when a stored item does not exist.
+var ErrNotFound = errors.New("store: not found")
 
 // ErrMismatch is returned when an existing store belongs to a different chain
 // or was written under a different key ID.
@@ -193,6 +200,41 @@ func (s *Store) Verify(ctx context.Context, keys chain.KeyResolver) (*chain.Repo
 	go func() { pw.CloseWithError(s.Export(ctx, pw)) }()
 	defer pr.Close()
 	return chain.Verify(pr, s.chainID, keys)
+}
+
+// SaveStatement durably stores an approver's signed statement, keyed by the
+// digest of its line, so an approval receipt can later be proven against it
+// without trusting Warden (ADR-0009). Saving the same statement twice is a no-op.
+func (s *Store) SaveStatement(ctx context.Context, line []byte) (string, error) {
+	signed, err := receipt.ParseLine(line)
+	if err != nil {
+		return "", fmt.Errorf("store: statement: %w", err)
+	}
+	canonicalLine, err := signed.Line()
+	if err != nil {
+		return "", err
+	}
+	d := digest.SHA256(canonicalLine)
+	if _, err := s.db.ExecContext(ctx,
+		"INSERT INTO statements (digest, line) VALUES (?, ?) ON CONFLICT(digest) DO NOTHING", d, canonicalLine); err != nil {
+		return "", fmt.Errorf("store: statement: %w", err)
+	}
+	return d, nil
+}
+
+// Statement returns the stored statement line with digest d.
+func (s *Store) Statement(ctx context.Context, d string) ([]byte, error) {
+	var line []byte
+	switch err := s.db.QueryRowContext(ctx, "SELECT line FROM statements WHERE digest = ?", d).Scan(&line); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, ErrNotFound
+	case err != nil:
+		return nil, fmt.Errorf("store: statement: %w", err)
+	}
+	if digest.SHA256(line) != d {
+		return nil, fmt.Errorf("store: statement %s does not match its digest", d)
+	}
+	return line, nil
 }
 
 // Close closes the database.
