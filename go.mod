@@ -3,6 +3,7 @@ module github.com/fkadusei/agent-warden
 go 1.27
 
 require (
+	github.com/cedar-policy/cedar-go v1.8.0
 	github.com/gowebpki/jcs v1.0.1
 	modernc.org/sqlite v1.58.0
 )
@@ -13,6 +14,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	golang.org/x/exp v0.0.0-20220921023135-46d9e7742f1e // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

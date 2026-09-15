@@ -52,3 +52,28 @@ The candidates were OPA/Rego (`github.com/open-policy-agent/opa`, v1.20.2) and C
   authorization mistakes, and its flexibility is more than Warden needs.
 - **Hand-written Go rules** — simplest to start, but policy changes become code
   changes, and decisions are hard to review independently of the gateway.
+
+## Implementation notes (2026-09-14, `internal/policy`)
+
+Confirmed against `cedar-go` v1.8.0 before and during implementation:
+
+- **Cedar skips a policy that fails to evaluate.** When a `forbid` errors (for
+  example, it reads an argument the agent left out), it simply stops applying, and a
+  `permit` elsewhere can allow the call. Warden therefore treats **any** evaluation
+  error on either action as a deny, recorded as `rule: "error:<policy ids>"`. A test
+  pins this down: an erroring `no_external_mail` forbid denies a call that
+  `mail_allowed` would otherwise allow.
+- **Every policy needs a unique `@id("...")` annotation.** Cedar reports the
+  determining policies in `Diagnostic.Reasons`; Warden records their IDs as the
+  receipt's `rule` (sorted, comma-separated, capped to the receipt field limit). A
+  default deny has no determining policy, so `rule` is empty.
+- **`policy_revision` is the SHA-256 of the policy document bytes**, so an auditor
+  can hash the file they were given and match it to receipts.
+- **Request shape:** `principal` is `User::"<principal>"` with a `Role` parent per
+  role; `resource` is `Tool::"<server>/<tool>"` with a `Server` parent; `context` is
+  `{agent, task, args, taint}`.
+- **Arguments are converted strictly.** Cedar has no floats or nulls, so anything it
+  cannot represent exactly is refused, not approximated: non-integer numbers,
+  integers beyond ±(2^53 − 1), nulls, duplicate keys, and nesting deeper than 16.
+  Refused input yields a deny with `rule: "invalid_input"`.
+- `cedar.Authorize` is used; `PolicySet.IsAuthorized` is deprecated in v1.8.0.
