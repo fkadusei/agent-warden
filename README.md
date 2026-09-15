@@ -80,6 +80,12 @@ go run ./cmd/warden export --out warden-local/receipts.jsonl   # prints the veri
 
 `warden-local/` holds private keys and is ignored by git; delete it to start over.
 
+**Serve a scenario.** `scenarios/` holds attack and benign scenarios (planted
+instructions, another tenant's ticket, customer data leaving). Start the tools with
+`go run ./cmd/example-tools --scenario deputy-ticket-refund` and the read-only tools
+return that scenario's planted content; `--list` shows them all. Each file lists the
+calls a compromised agent would make and the outcome Warden must produce.
+
 ## Attack it
 
 ```sh

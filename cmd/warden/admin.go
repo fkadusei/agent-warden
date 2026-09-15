@@ -27,55 +27,6 @@ import (
 	"github.com/fkadusei/agent-warden/internal/upstream"
 )
 
-const examplePolicy = `// Example policy for the example tool servers. Every policy needs a unique @id.
-
-// Support staff can use the CRM without approval.
-@id("support_crm")
-permit (principal in Role::"support", action in [Action::"call", Action::"call_unattended"], resource in Server::"crm");
-
-// Refunds need a human approver...
-@id("refunds_need_approval")
-permit (principal in Role::"support", action == Action::"call", resource == Tool::"payments/refund");
-
-// ...unless they are small.
-@id("small_refunds_unattended")
-permit (principal in Role::"support", action == Action::"call_unattended", resource == Tool::"payments/refund")
-when { context.args.amount <= 100 };
-
-@id("web_fetch")
-permit (principal in Role::"support", action in [Action::"call", Action::"call_unattended"], resource == Tool::"web/fetch");
-
-@id("mail_allowed")
-permit (principal in Role::"support", action in [Action::"call", Action::"call_unattended"], resource == Tool::"mail/send");
-
-// Once untrusted web content is in the task, no email goes out.
-@id("no_email_while_tainted")
-forbid (principal, action, resource == Tool::"mail/send")
-when { context.taint.contains("web") };
-
-// Planted instructions or content written by another principal can still be read,
-// but refunds and email then need a human approver.
-@id("suspicious_content_needs_approval")
-forbid (principal, action == Action::"call_unattended", resource)
-when {
-  (resource == Tool::"payments/refund" || resource == Tool::"mail/send") &&
-  (context.taint.contains("flag:instruction") || context.taint.contains("foreign_principal"))
-};
-
-// Customer data never leaves the tenant by email.
-@id("no_pii_outside_tenant")
-forbid (principal, action, resource == Tool::"mail/send")
-when { context.taint.contains("pii") && !(context.args.to like "*@tenant-a.example") };
-`
-
-const exampleBroker = `{
-  "v": 1,
-  "bindings": [
-    {"server": "payments", "tool": "*", "inject": "header", "name": "Authorization", "prefix": "Bearer ", "secret": "env:WARDEN_SECRET_PAYMENTS"}
-  ]
-}
-`
-
 func splitList(s string) []string {
 	var out []string
 	for _, v := range strings.Split(s, ",") {
@@ -170,9 +121,9 @@ func cmdInit(_ context.Context, args []string, _ io.Reader, out io.Writer) error
 		Store: "data/receipts.db", Anchor: "data/anchor.jsonl",
 		CheckpointEvery: 100, CheckpointInterval: config.Duration{Duration: time.Minute},
 		Policy: "policy.cedar", Pins: "pins.json", Broker: "broker.json", SecretsDir: "secrets", Approvers: "approvers.json",
-		Roles:     map[string][]string{"alice@tenant-a": {"support"}},
-		Taint:     map[string]string{"web": "web"},
-		ToolTaint: map[string]string{"crm/lookup": "pii"},
+		Roles:     exampletools.Roles(),
+		Taint:     exampletools.Taint(),
+		ToolTaint: exampletools.ToolTaint(),
 	}
 	for _, s := range exampletools.Servers {
 		cfg.Servers = append(cfg.Servers, config.Server{Name: s, URL: base + "/" + s})
@@ -186,8 +137,8 @@ func cmdInit(_ context.Context, args []string, _ io.Reader, out io.Writer) error
 		data []byte
 	}{
 		{p("keys.json"), append(keySet, '\n')},
-		{p("policy.cedar"), []byte(examplePolicy)},
-		{p("broker.json"), []byte(exampleBroker)},
+		{p("policy.cedar"), []byte(exampletools.Policy)},
+		{p("broker.json"), []byte(exampletools.Broker)},
 		{p("warden.json"), append(cfgData, '\n')},
 	} {
 		if err := writeNew(f.path, f.data, 0o644); err != nil {

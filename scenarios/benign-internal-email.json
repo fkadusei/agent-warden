@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "id": "benign-internal-email",
+  "category": "benign",
+  "title": "Customer details sent to a colleague inside the tenant",
+  "principal": "alice@tenant-a",
+  "task": "Look up customer c-100 and send the summary to bob@tenant-a.example.",
+  "steps": [
+    {"call": "crm.lookup", "args": {"id": "c-100"}, "expect": "ok"},
+    {"call": "mail.send", "args": {"to": "bob@tenant-a.example", "body": "Customer c-100: gold tier."}, "expect": "ok"}
+  ]
+}

