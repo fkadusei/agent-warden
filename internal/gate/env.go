@@ -29,6 +29,7 @@ import (
 	"github.com/fkadusei/agent-warden/internal/composite"
 	"github.com/fkadusei/agent-warden/internal/gateway"
 	"github.com/fkadusei/agent-warden/internal/identity"
+	"github.com/fkadusei/agent-warden/internal/inspect"
 	"github.com/fkadusei/agent-warden/internal/mcpgw"
 	"github.com/fkadusei/agent-warden/internal/policy"
 	"github.com/fkadusei/agent-warden/internal/registry"
@@ -277,8 +278,10 @@ func newEnv(ctx context.Context) (e *Env, err error) {
 		}
 		return nil, errors.New("not a trusted approver")
 	}
+	var toolNames []string // set from the handler below, before anything is served
 	e.gw, err = gateway.New(gateway.Config{
 		Store: e.store, Registry: reg, Policy: eng, Broker: brk, Roots: e.pool, Approvers: approvers, Upstream: up,
+		Inspect: func(content string) []string { return inspect.Flags(inspect.Inspect(content, toolNames)) },
 		Roles: func(p string) []string {
 			if p == "alice@tenant-a" {
 				return []string{"support"}
@@ -289,10 +292,11 @@ func newEnv(ctx context.Context) (e *Env, err error) {
 	if err != nil {
 		return nil, err
 	}
-	handler, _, err := mcpgw.NewHandler(ctx, e.gw, reg, up, names)
+	handler, exposed, err := mcpgw.NewHandler(ctx, e.gw, reg, up, names)
 	if err != nil {
 		return nil, err
 	}
+	toolNames = exposed.Tools
 
 	serverKey, err := mldsa.GenerateKey(mldsa.MLDSA65())
 	if err != nil {

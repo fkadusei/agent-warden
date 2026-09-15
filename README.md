@@ -114,6 +114,11 @@ identity header; and an edited receipt log. It exits `1` if any defense fails, a
   is receipted before anything runs; high-risk calls wait for an approver's signed
   statement; tool credentials are injected by Warden and scrubbed from results;
   untrusted output taints the task.
+- **Output inspection (`internal/inspect`):** tool results are checked for planted
+  instructions, hidden text, directives naming exposed tools, and encoded blobs. Findings
+  become taint labels (`flag:instruction`, ...) that policy can act on and receipts
+  record; the matched text is never stored. Detection is a signal for policy, never the
+  guarantee.
 - **MCP transport (`internal/mcpgw`, `internal/upstream`):** agents connect over MCP on
   mutual TLS 1.3, proving their task credential with its key; pinned tools appear as
   `server.tool`. Warden reaches tool servers as an MCP client and delivers their

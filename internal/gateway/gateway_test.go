@@ -19,6 +19,7 @@ import (
 	"github.com/fkadusei/agent-warden/internal/commit"
 	"github.com/fkadusei/agent-warden/internal/composite"
 	"github.com/fkadusei/agent-warden/internal/identity"
+	"github.com/fkadusei/agent-warden/internal/inspect"
 	"github.com/fkadusei/agent-warden/internal/policy"
 	"github.com/fkadusei/agent-warden/internal/receipt"
 	"github.com/fkadusei/agent-warden/internal/registry"
@@ -241,6 +242,9 @@ func newFixture(t *testing.T) *fixture {
 				return "web"
 			}
 			return ""
+		},
+		Inspect: func(content string) []string {
+			return inspect.Flags(inspect.Inspect(content, []string{"crm.lookup", "payments.refund", "web.fetch", "mail.send"}))
 		},
 		Now: f.clock.Now,
 	})
@@ -579,8 +583,16 @@ func TestTaintBlocksEmailAfterWebContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if web.Status != StatusOK || fmt.Sprint(web.Taint) != "[web]" {
+	// The page carries planted instructions: the inspector flags them alongside the
+	// server's own label, and both reach the result receipt.
+	if web.Status != StatusOK || fmt.Sprint(web.Taint) != "[flag:instruction web]" {
 		t.Fatalf("web fetch %+v", web)
+	}
+	if r := f.receipt(t, web.ResultSeq); fmt.Sprint(r.Result.Taint) != "[flag:instruction web]" {
+		t.Fatalf("result receipt taint %v", r.Result.Taint)
+	}
+	if lookup, err := f.gw.Call(ctx, f.aliceCred, "crm", "lookup", json.RawMessage(`{"id":"c-100"}`)); err != nil || len(lookup.Taint) != 0 {
+		t.Fatalf("ordinary CRM output was labeled: %+v %v", lookup, err)
 	}
 	mail, err := f.gw.Call(ctx, f.aliceCred, "mail", "send", json.RawMessage(`{"to":"bob@tenant-a.example"}`))
 	if err != nil {
@@ -589,7 +601,7 @@ func TestTaintBlocksEmailAfterWebContent(t *testing.T) {
 	if mail.Status != StatusDenied || mail.Rule != "no_email_while_tainted" {
 		t.Fatalf("email after web content: %+v", mail)
 	}
-	if d := f.receipt(t, mail.DecisionSeq); fmt.Sprint(d.Decision.Taint) != "[web]" {
+	if d := f.receipt(t, mail.DecisionSeq); fmt.Sprint(d.Decision.Taint) != "[flag:instruction web]" {
 		t.Fatalf("decision receipt taint %v", d.Decision.Taint)
 	}
 	f.verifyLog(t)

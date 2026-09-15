@@ -65,6 +65,10 @@ type Config struct {
 	// Taint returns the taint label for a tool's output, or "" if its output is
 	// trusted; nothing is tainted if nil.
 	Taint func(server, tool string) string
+	// Inspect returns taint labels for suspicious content in a tool's scrubbed
+	// output (see internal/inspect); nothing is inspected if nil. Labels are
+	// heuristic: they inform policy and receipts, and never replace authorization.
+	Inspect func(content string) []string
 	// Now is Warden's clock; time.Now if nil.
 	Now func() time.Time
 	// ApprovalLimits bound approver statements; approval.DefaultLimits if zero.
@@ -474,7 +478,11 @@ func (g *Gateway) execute(ctx context.Context, p *pending, resp *Response) (*Res
 				labels = append(labels, TaintCredentialEcho)
 				resp.CredentialScrubbed = true
 			}
+			if g.cfg.Inspect != nil {
+				labels = append(labels, g.cfg.Inspect(string(content))...)
+			}
 			slices.Sort(labels)
+			labels = slices.Compact(labels)
 			c, salt, err := commit.New(string(content))
 			if err != nil {
 				return nil, fmt.Errorf("%w: result commitment: %v", ErrReceipt, err)

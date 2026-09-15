@@ -29,6 +29,7 @@ import (
 	"github.com/fkadusei/agent-warden/internal/composite"
 	"github.com/fkadusei/agent-warden/internal/gateway"
 	"github.com/fkadusei/agent-warden/internal/identity"
+	"github.com/fkadusei/agent-warden/internal/inspect"
 	"github.com/fkadusei/agent-warden/internal/keys"
 	"github.com/fkadusei/agent-warden/internal/policy"
 	"github.com/fkadusei/agent-warden/internal/receipt"
@@ -248,6 +249,9 @@ func run(out string, w io.Writer) (*result, error) {
 				return "web"
 			}
 			return ""
+		},
+		Inspect: func(content string) []string {
+			return inspect.Flags(inspect.Inspect(content, []string{"crm.lookup", "crm.export", "crm.debug", "payments.refund", "web.fetch", "mail.send", "hr.salaries"}))
 		},
 	})
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 	"github.com/fkadusei/agent-warden/internal/config"
 	"github.com/fkadusei/agent-warden/internal/gateway"
 	"github.com/fkadusei/agent-warden/internal/identity"
+	"github.com/fkadusei/agent-warden/internal/inspect"
 	"github.com/fkadusei/agent-warden/internal/keyfile"
 	"github.com/fkadusei/agent-warden/internal/keys"
 	"github.com/fkadusei/agent-warden/internal/mcpgw"
@@ -124,10 +125,14 @@ func serve(ctx context.Context, cfg *config.Config, out io.Writer, ready func(ad
 	}
 	defer up.Close()
 
+	// The inspector looks for directives naming the exposed tools, which are known
+	// only once the handler is built; it is set before anything is served.
+	var toolNames []string
 	gw, err := gateway.New(gateway.Config{
 		Store: st, Registry: reg, Policy: eng, Broker: brk, Roots: pool, Approvers: approvers, Upstream: up,
-		Roles: func(p string) []string { return cfg.Roles[p] },
-		Taint: func(server, _ string) string { return cfg.Taint[server] },
+		Roles:   func(p string) []string { return cfg.Roles[p] },
+		Taint:   func(server, _ string) string { return cfg.Taint[server] },
+		Inspect: func(content string) []string { return inspect.Flags(inspect.Inspect(content, toolNames)) },
 	})
 	if err != nil {
 		return err
@@ -136,6 +141,7 @@ func serve(ctx context.Context, cfg *config.Config, out io.Writer, ready func(ad
 	if err != nil {
 		return err
 	}
+	toolNames = exposed.Tools
 
 	agentLn, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
