@@ -303,21 +303,52 @@ type PendingCall struct {
 	CallDigest string
 	// Args are the canonical arguments the tool would receive.
 	Args json.RawMessage
+	// Approval is set once an approver has answered.
+	Approval *receipt.Approval
+}
+
+func (p *pending) view() (*PendingCall, error) {
+	cd, err := approval.CallDigest(p.decision.TaskID, *p.decision.Actor, *p.decision.Call)
+	if err != nil {
+		return nil, err
+	}
+	pc := &PendingCall{Decision: p.decision, CallDigest: cd, Args: slices.Clone(p.args)}
+	if p.approval != nil {
+		a := *p.approval
+		pc.Approval = &a
+	}
+	return pc, nil
 }
 
 // Pending returns the call waiting under decisionSeq.
 func (g *Gateway) Pending(decisionSeq int64) (*PendingCall, error) {
 	g.mu.Lock()
+	defer g.mu.Unlock()
 	p := g.pending[decisionSeq]
-	g.mu.Unlock()
 	if p == nil {
 		return nil, ErrNotPending
 	}
-	cd, err := approval.CallDigest(p.decision.TaskID, *p.decision.Actor, *p.decision.Call)
-	if err != nil {
-		return nil, err
+	return p.view()
+}
+
+// ListPending returns every call held for approval that has not run yet, in
+// decision order.
+func (g *Gateway) ListPending() ([]*PendingCall, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make([]*PendingCall, 0, len(g.pending))
+	for _, p := range g.pending {
+		if p.running {
+			continue
+		}
+		pc, err := p.view()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pc)
 	}
-	return &PendingCall{Decision: p.decision, CallDigest: cd, Args: slices.Clone(p.args)}, nil
+	slices.SortFunc(out, func(a, b *PendingCall) int { return int(a.Decision.Seq - b.Decision.Seq) })
+	return out, nil
 }
 
 // Approve accepts an approver's signed statement for a pending call and writes

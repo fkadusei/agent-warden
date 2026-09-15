@@ -16,6 +16,9 @@
 # Demo output (generated keys, logs, and tampered copies)
 /demo-output/
 
+# Default `warden init` directory: private keys, receipt store, and secrets
+/warden-local/
+
 # Go
 /bin/
 /dist/
