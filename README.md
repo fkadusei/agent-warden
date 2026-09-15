@@ -86,6 +86,12 @@ instructions, another tenant's ticket, customer data leaving). Start the tools w
 return that scenario's planted content; `--list` shows them all. Each file lists the
 calls a compromised agent would make and the outcome Warden must produce.
 
+**Drive it with a model.** [`agent/`](agent/README.md) is a model-agnostic Python agent
+that reaches tools only through Warden: Claude through the Anthropic API, or any
+OpenAI-compatible endpoint (OpenAI, Ollama, vLLM, LM Studio). For a scenario it reports
+which attack calls the model attempted and what Warden answered. `--adapter script`
+replays the scenario's calls with no model at all.
+
 ## Attack it
 
 ```sh
