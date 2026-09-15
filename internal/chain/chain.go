@@ -74,6 +74,47 @@ func NewAppender(key *composite.PrivateKey, kid, chainID string) (*Appender, err
 	return &Appender{key: key, kid: kid, chainID: chainID, prev: prev}, nil
 }
 
+// State is the part of an Appender that must survive a restart.
+type State struct {
+	// Next is the sequence number of the next receipt.
+	Next int64
+	// Prev is the digest of the last written line, or the genesis prev when Next is 0.
+	Prev string
+	// LastTS is the timestamp of the last written receipt, empty when Next is 0.
+	LastTS string
+}
+
+// State returns a snapshot of the appender's position in the chain.
+func (a *Appender) State() State {
+	return State{Next: a.next, Prev: a.prev, LastTS: a.lastTS}
+}
+
+// ResumeAppender continues an existing chain from st, for example after a
+// restart or to roll back an append whose line was never durably written.
+func ResumeAppender(key *composite.PrivateKey, kid, chainID string, st State) (*Appender, error) {
+	a, err := NewAppender(key, kid, chainID)
+	if err != nil {
+		return nil, err
+	}
+	if st.Next == 0 {
+		if st.Prev != a.prev || st.LastTS != "" {
+			return nil, errors.New("chain: resume at seq 0 must use the genesis prev for this key")
+		}
+		return a, nil
+	}
+	if st.Next < 0 || st.Next > receipt.MaxSeq+1 {
+		return nil, fmt.Errorf("chain: resume seq %d out of range", st.Next)
+	}
+	if !digest.Valid(st.Prev) {
+		return nil, errors.New("chain: resume prev is not a sha256 digest")
+	}
+	if st.LastTS == "" {
+		return nil, errors.New("chain: resume after seq 0 needs the last timestamp")
+	}
+	a.next, a.prev, a.lastTS = st.Next, st.Prev, st.LastTS
+	return a, nil
+}
+
 // Next is the sequence number the next receipt will get.
 func (a *Appender) Next() int64 { return a.next }
 
