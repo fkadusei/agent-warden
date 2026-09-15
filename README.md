@@ -8,9 +8,36 @@ identifies the caller, checks policy, pauses for human approval when the risk
 warrants it, treats tool output as untrusted, and writes a **signed,
 hash-chained receipt** that anyone holding the public key can verify offline.
 
-> **Status: Phase 1 complete — the receipt library and `warden-verify`.** The
-> gateway, demo agent, and benchmark come next. See the build phases in
-> [`docs/design.md`](docs/design.md#7-build-phases).
+> **Status: Phase 2 in progress — the enforcement pipeline runs end to end.** The
+> MCP transport, demo agent, and benchmark come next. See the build phases in
+> [`docs/design.md`](docs/design.md#7-build-phases) and
+> [`docs/phase2-plan.md`](docs/phase2-plan.md).
+
+## Try it
+
+Requires Go 1.27.
+
+```sh
+go run ./cmd/warden-demo
+```
+
+The demo sends a support agent's tool calls through the real pipeline (only the tools
+and one API token are simulated) and prints what Warden decided at each step:
+
+- a CRM lookup and a small refund run straight away;
+- a $500 refund waits for approval, refuses to run early, rejects the requester
+  approving it themselves, then runs once a second person approves;
+- a web page with hidden instructions taints the task, so the next email is blocked;
+- a tool that changes its description after being reviewed is refused;
+- a tool that echoes its API token has the token scrubbed before the agent sees it;
+- a tool no policy permits is denied.
+
+It writes the signed receipt log, an anchored checkpoint, the public key, and three
+tampered copies of the log to `demo-output/`, then prints the `warden-verify`
+commands to run. The real log prints **VERIFIED**; each tampered copy prints
+**FAILED** with the line and the reason (`bad_signature`, `seq_gap`,
+`checkpoint_mismatch`). Edit `demo-output/receipts.jsonl` yourself and run the
+command again to see what Warden catches. Delete `demo-output/` to run the demo again.
 
 ## What works today
 
@@ -23,9 +50,14 @@ hash-chained receipt** that anyone holding the public key can verify offline.
 - **Checkpoints:** RFC 9162 Merkle roots, signed and anchored, which detect
   truncation, full rewrites by the key holder, and forked histories.
 - **`warden-verify`:** checks all of the above offline, from public keys alone.
+- **Enforcement pipeline (`internal/gateway`):** every call is checked against a
+  short-lived task credential, a pinned tool manifest, and Cedar policy; the decision
+  is receipted before anything runs; high-risk calls wait for an approver's signed
+  statement; tool credentials are injected by Warden and scrubbed from results;
+  untrusted output taints the task.
 
-Not yet: RFC 3161 anchoring, key-epoch certificates, key rotation and revocation,
-approval receipts.
+Not yet: the MCP transport and `warden approve` CLI, RFC 3161 anchoring, key rotation
+and revocation, and the benchmark.
 
 ## Verify a receipt log
 

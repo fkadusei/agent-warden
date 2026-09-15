@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS statements (
 	digest TEXT PRIMARY KEY,
 	line   BLOB NOT NULL
 ) STRICT;
+CREATE TABLE IF NOT EXISTS openings (
+	commitment TEXT PRIMARY KEY,
+	salt       BLOB NOT NULL,
+	value      BLOB NOT NULL
+) STRICT;
 `
 
 // ErrNotFound is returned when a stored item does not exist.
@@ -236,6 +241,36 @@ func (s *Store) Statement(ctx context.Context, d string) ([]byte, error) {
 	}
 	return line, nil
 }
+
+// SaveOpening stores the salt and canonical value behind a commitment
+// (ADR-0005), so one call's arguments or result can be disclosed later without
+// disclosing any other. The caller must have computed commitment from salt and
+// value; Opening checks it again on the way out.
+func (s *Store) SaveOpening(ctx context.Context, commitment string, salt, value []byte) error {
+	if !digest.Valid(commitment) {
+		return fmt.Errorf("store: opening: malformed commitment")
+	}
+	if _, err := s.db.ExecContext(ctx,
+		"INSERT INTO openings (commitment, salt, value) VALUES (?, ?, ?) ON CONFLICT(commitment) DO NOTHING",
+		commitment, salt, value); err != nil {
+		return fmt.Errorf("store: opening: %w", err)
+	}
+	return nil
+}
+
+// Opening returns the salt and value stored for commitment.
+func (s *Store) Opening(ctx context.Context, commitment string) (salt, value []byte, err error) {
+	switch err := s.db.QueryRowContext(ctx, "SELECT salt, value FROM openings WHERE commitment = ?", commitment).Scan(&salt, &value); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil, ErrNotFound
+	case err != nil:
+		return nil, nil, fmt.Errorf("store: opening: %w", err)
+	}
+	return salt, value, nil
+}
+
+// ChainID is the chain this store holds.
+func (s *Store) ChainID() string { return s.chainID }
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }

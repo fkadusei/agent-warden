@@ -13,6 +13,9 @@
 *.jsonl
 !testdata/**/*.jsonl
 
+# Demo output (generated keys, logs, and tampered copies)
+/demo-output/
+
 # Go
 /bin/
 /dist/

@@ -52,6 +52,25 @@ agent ◄──result (tagged)───┘
 **Write-ahead rule (ADR-0004):** step 4 must succeed before step 6 may start. If
 the log is unavailable, the call is refused.
 
+**Implemented in `internal/gateway`** as `Call`, `Pending`, `Approve`, and `Resume`:
+
+- A rejected task credential, or a tool server that can't describe the tool, returns an
+  error with **no receipt**, because the request can't be attributed or described.
+- Unpinned or changed tools are denied with rule `tool_unpinned` or `tool_changed`;
+  invalid arguments with `invalid_input`. Every denial is receipted and nothing runs.
+- Arguments and results are committed, and their openings stored, before the receipt
+  that carries the commitment is written.
+- Approved calls run only through `Resume`, with a credential for the same agent,
+  principal, and task, before the approval expires. The manifest is checked again
+  just before execution, so a tool changed after approval is not run.
+- A missing credential, a changed tool, or a tool error still writes a result receipt
+  with status `error`. If a result receipt can't be written, the result is withheld.
+- Receipt timestamps are assigned under one lock, so concurrent calls keep a valid
+  chain (tested with the race detector).
+
+`go run ./cmd/warden-demo` runs a 13-step scenario through this pipeline and writes a
+log that `warden-verify` checks.
+
 ## 4. The receipt
 
 ### 4.1 Payload
