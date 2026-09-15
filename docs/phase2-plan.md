@@ -23,10 +23,15 @@ comes last, so every security decision is testable without a protocol in the way
 | 2.8 | **MCP transport** — MCP server to the agent (one untyped `AddTool` handler per registered tool), MCP client to upstream tools (`ClientSession.CallTool`) | `cmd/warden` | W7 | 2.7 |
 | 2.9 | **Phase gate** — `authz`, `approval`, `poison`, fail-closed scenarios | tests | — | 2.8 |
 
-## Decisions needed from the owner
+## Decisions
+
+**All three accepted by the owner on 2026-09-14**, as proposed below: the OID is
+recorded in ADR-0008, approval receipts in ADR-0009, and the approver CLI in ADR-0009.
+The policy engine stays Cedar (ADR-0007): only `cedar-go`'s optional schema-validation
+add-on is experimental; policy evaluation is stable.
 
 1. **OID arc for the Ed25519 binding extension (ADR-0008).** Proposal: use a
-   UUID-based OID under `2.25` (ITU-T X.667 / RFC 4122 §4.1 via ISO/IEC 9834-8). It
+   UUID-based OID under `2.25` (ITU-T X.667 | ISO/IEC 9834-8). It
    needs no registration, is globally unique, and can be generated once and fixed in
    the code. The alternative is registering an IANA Private Enterprise Number, which
    takes time and ties the OID to an organization.

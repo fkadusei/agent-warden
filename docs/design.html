@@ -109,6 +109,7 @@
   <a href="#adr6">ADR-0006 Tech stack</a>
   <a href="#adr7">ADR-0007 Cedar</a>
   <a href="#adr8">ADR-0008 Certificates</a>
+  <a href="#adr9">ADR-0009 Approvals</a>
 </nav>
 
 <main>
@@ -200,7 +201,7 @@ agent ◄──result (tagged)───┘</code></pre>
     <tr><td><code>kid</code> (protected header, not the payload)</td><td>Which signing key epoch; resolves to a certificate</td><td>W11</td></tr>
   </tbody>
 </table></div>
-<p>Receipt types: <code>decision</code>, <code>approval</code>, <code>result</code>, <code>key_rotation</code>, <code>checkpoint</code>. Implemented in <code>internal/receipt</code>: <code>decision</code> and <code>result</code> <span class="pill g">passing</span>. The other three are reserved; their bodies are not specified yet, and receipts of those types are refused rather than accepted. Checkpoints (§4.4) turned out not to need a receipt type: they are separate signed statements, kept outside the log.</p>
+<p>Receipt types: <code>decision</code>, <code>approval</code>, <code>result</code>, <code>key_rotation</code>, <code>checkpoint</code>. Implemented in <code>internal/receipt</code>: <code>decision</code> and <code>result</code> <span class="pill g">passing</span>. <code>approval</code> is specified in ADR-0009 (implementation: Phase 2 step 2.4); <code>key_rotation</code> and <code>checkpoint</code> are reserved. Until implemented, receipts of those types are refused rather than accepted. Checkpoints (§4.4) turned out not to need a receipt type: they are separate signed statements, kept outside the log.</p>
 <p>A <code>result</code> receipt carries the same <code>task_id</code>, <code>actor</code>, and <code>call</code> as its decision, plus <code>result: {decision_seq, status, result_commitment, taint}</code>. <code>decision_seq</code> must be lower than the receipt's own <code>seq</code>; <code>result_commitment</code> is required when <code>status</code> is <code>ok</code>.</p>
 <div class="box info">
   <span class="tag">Format rules (enforced on sign and verify)</span>
@@ -321,7 +322,7 @@ agent ◄──result (tagged)───┘</code></pre>
 <h2 id="questions">8. Open questions</h2>
 <ol class="steps">
   <li><s>Policy engine</s> — <strong>decided: Cedar</strong> (ADR-0007).</li>
-  <li><s>Certificate signatures</s> — <strong>decided: plain ML-DSA-65</strong> (ADR-0008). Still open within it: the OID arc for the Ed25519 binding extension.</li>
+  <li><s>Certificate signatures</s> — <strong>decided: plain ML-DSA-65</strong> (ADR-0008), with the Ed25519 binding extension under the UUID-based OID <code>2.25.319797216735078154913038669087058524786</code>.</li>
   <li><strong>Draft churn.</strong> The composite draft is at -04. If the construction changes, the receipt <code>v</code> and <code>alg</code> must change with it. Is pinning <code>alg_ref</code> in the protected header enough?</li>
   <li><strong>SLH-DSA for checkpoints?</strong> Hash-based, larger and slower, more conservative — is there a case for using it for checkpoints only, since they are few and long-lived?</li>
   <li><strong>Checkpoint anchor for the demo.</strong> RFC 3161 needs a TSA; use a public TSA, or run a local one and document the trade-off?</li>
@@ -557,11 +558,19 @@ agent ◄──result (tagged)───┘</code></pre>
 </div>
 
 <div class="adr" id="adr8">
-  <h3>ADR-0008 — Plain ML-DSA-65 certificates; receipts stay hybrid <span class="pill">Proposed</span></h3>
-  <p><strong>Decision.</strong> All certificate signatures use plain ML-DSA-65 (RFC 9881). Key-epoch certificates carry the ML-DSA-65 component as the subject public key and bind the Ed25519 component in a <strong>critical</strong> Warden extension; the verifier rebuilds the composite key and rejects certificates without it. The extension OID needs an arc Warden controls; until then it is a test-only placeholder.</p>
+  <h3>ADR-0008 — Plain ML-DSA-65 certificates; receipts stay hybrid <span class="pill g">Accepted</span></h3>
+  <p><strong>Decision.</strong> All certificate signatures use plain ML-DSA-65 (RFC 9881). Key-epoch certificates carry the ML-DSA-65 component as the subject public key and bind the Ed25519 component in a <strong>critical</strong> Warden extension; the verifier rebuilds the composite key and rejects certificates without it. The extension OID is the UUID-based <code>2.25.319797216735078154913038669087058524786</code> (ITU-T X.667), generated once and never to be regenerated.</p>
   <p><strong>Why.</strong> Composite X.509 is unsupported in Go 1.27, pyca <code>cryptography</code> 50.0.1, and OpenSSL 3.6.4; plain ML-DSA-65 certificates are supported and verified locally.</p>
   <p><strong>Consequences.</strong> Standard formats throughout. No classical hedge on the chain — limited by short-lived internal certificates, anchored checkpoints, and hybrid receipts. Generic tools will reject the unknown critical extension unless told to ignore it.</p>
   <p><strong>Rejected.</strong> Hand-built composite certificates; parallel ML-DSA-65 + Ed25519 certificates; a JSON key manifest instead of X.509; a non-critical extension (allows silent downgrade).</p>
+</div>
+
+<div class="adr" id="adr9">
+  <h3>ADR-0009 — Approval receipts <span class="pill g">Accepted</span></h3>
+  <p><strong>Decision.</strong> An <code>approval</code> receipt carries the decision's task, actor, and call, plus <code>{decision_seq, outcome, approver, statement, expires_ts}</code>. <code>statement</code> is the digest of a statement the approver signs with their <em>own</em> key, covering the exact call they were shown; Warden verifies it before writing the receipt and stores the full statement separately. Demo approvals use <code>warden approve &lt;decision_seq&gt;</code> (or <code>--reject</code>).</p>
+  <p><strong>Rules checked by warden-verify.</strong> The approval must match an earlier <code>require_approval</code> decision; one approval per decision; the approver differs from the principal; a result needs an earlier <code>approved</code> outcome and must not be after <code>expires_ts</code>. New reasons: <code>duplicate_approval</code>, <code>self_approval</code>, <code>rejected_call_executed</code>, <code>approval_expired</code>.</p>
+  <p><strong>Consequences.</strong> <code>missing_approval</code> becomes a real check. Approver keys are a second trust list. Expiry relies on Warden-written timestamps, bounded by anchored checkpoints.</p>
+  <p><strong>Rejected.</strong> Warden-only approvals (only as trustworthy as Warden); approver signing the receipt itself (two signers in the chain); a web approval queue (UI work unrelated to the security claims).</p>
 </div>
 
 <div class="box warn">

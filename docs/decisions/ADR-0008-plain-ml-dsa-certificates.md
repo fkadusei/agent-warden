@@ -1,6 +1,6 @@
 # ADR-0008: Plain ML-DSA-65 certificates; receipts stay hybrid
 
-- **Status:** Proposed (the Ed25519 binding needs owner review)
+- **Status:** Accepted (2026-09-14, including the OID below)
 - **Date:** 2026-09-14
 - **Related:** ADR-0002 (composite receipt signatures), ADR-0003, threats W11, W12;
   design §4.5
@@ -30,9 +30,16 @@ can only hold one key type Go understands.
    root's ML-DSA-65 signature covers both.
 3. A verifier builds the composite public key as `ML-DSA-65 key ‖ Ed25519 key` from
    the certificate, and rejects a key-epoch certificate that lacks the extension.
-4. The extension's OID must come from an arc Warden controls. Until one is assigned,
-   the OID is a documented placeholder, and certificates using it are for testing
-   only.
+4. The extension's OID is a UUID-based OID under the `2.25` arc
+   (ITU-T X.667 | ISO/IEC 9834-8), which needs no registration:
+
+   ```
+   id-warden-ed25519-binding  OBJECT IDENTIFIER ::= { 2 25 319797216735078154913038669087058524786 }
+   ```
+
+   It is derived from the version 4 UUID `f096b41e-17bb-4d1e-bac6-81117bcd7a72`,
+   generated once on 2026-09-14. It must never be regenerated; a different binding
+   format would get a new OID.
 
 ## Consequences
 
