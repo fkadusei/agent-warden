@@ -21,8 +21,8 @@ comes last, so every security decision is testable without a protocol in the way
 | 2.6 ✅ | **Credential broker** — inject tool credentials at execution; the agent never holds them. Secrets come only from `WARDEN_SECRET_*` variables or owner-only files; missing secrets refuse the call; echoed credentials are scrubbed | `internal/broker` | W3 | 2.5 |
 | 2.7 ✅ | **Enforcement pipeline** — identify → pin → decide → receipt → approve → execute → inspect → receipt, as a plain Go API (`Call`, `Pending`, `Approve`, `Resume`). Plus `cmd/warden-demo`, a runnable scenario whose output `warden-verify` checks. Output inspection is minimal (per-server taint labels, credential echo); full inspection is Phase 3 | `internal/gateway`, `cmd/warden-demo` | all of the above | 2.1–2.6 |
 | 2.8a ✅ | **MCP transport** (ADR-0011) — stateless Streamable HTTP over mutual TLS 1.3 with the task credential as client certificate; tools exposed as `server.tool` plus `warden.resume`; MCP client to upstream servers with per-call header credentials (HTTP) or start-time env credentials (stdio); Warden server certificate profile | `internal/mcpgw`, `internal/upstream`, `internal/identity` | W3, W7 | 2.7 |
-| 2.8b | **`warden` binary** — config, key and certificate setup, approver HTTPS API with signed list requests, `warden approve` | `cmd/warden` | W6, W7 | 2.8a |
-| 2.9 | **Phase gate** — `authz`, `approval`, `poison`, fail-closed scenarios | tests | — | 2.8 |
+| 2.8b ✅ | **`warden` binary** — config, key and certificate setup, approver HTTPS API with signed list requests, `warden approve` | `cmd/warden` | W6, W7 | 2.8a |
+| 2.9 ✅ | **Phase gate** — `authz`, `approval`, `poison`, fail-closed scenarios | `internal/gate`, `cmd/warden-gate` | W2–W9 | 2.8 |
 
 ## Decisions
 

@@ -8,8 +8,8 @@ identifies the caller, checks policy, pauses for human approval when the risk
 warrants it, treats tool output as untrusted, and writes a **signed,
 hash-chained receipt** that anyone holding the public key can verify offline.
 
-> **Status: Phase 2 in progress — the enforcement pipeline runs end to end.** The
-> MCP transport, demo agent, and benchmark come next. See the build phases in
+> **Status: Phase 2 complete — Warden runs as a real MCP gateway and passes its
+> attack gate.** Full output inspection and the benchmark come next. See the build phases in
 > [`docs/design.md`](docs/design.md#7-build-phases) and
 > [`docs/phase2-plan.md`](docs/phase2-plan.md).
 
@@ -39,6 +39,65 @@ commands to run. The real log prints **VERIFIED**; each tampered copy prints
 `checkpoint_mismatch`). Edit `demo-output/receipts.jsonl` yourself and run the
 command again to see what Warden catches. Delete `demo-output/` to run the demo again.
 
+## Run Warden locally
+
+This runs the real gateway: agents connect over MCP with mutual TLS, calls go to
+separate tool servers, and an approver signs from another command. Use two
+terminals, both in the repository root.
+
+**Terminal 1 — set up and start the servers**
+
+```sh
+go run ./cmd/warden init                      # creates warden-local/ (keys are 0600)
+EXAMPLE_PAYMENTS_TOKEN=demo go run ./cmd/example-tools &
+go run ./cmd/warden pin                       # review the tools...
+go run ./cmd/warden pin --write               # ...then pin them
+go run ./cmd/warden add-approver --id bob@tenant-a --out warden-local/bob.key
+WARDEN_SECRET_PAYMENTS=demo go run ./cmd/warden serve
+```
+
+**Terminal 2 — act as the agent and the approver**
+
+```sh
+go run ./cmd/warden issue-task --agent support-agent-7 --principal alice@tenant-a \
+  --task ticket-4821 --out warden-local/agent        # valid for 15 minutes
+go run ./cmd/warden call --list
+go run ./cmd/warden call --tool payments.refund --args '{"payment_id":"p-10","amount":500}'
+#   -> needs human approval ... Decision receipt #N
+go run ./cmd/warden approve --key warden-local/bob.key --id bob@tenant-a
+go run ./cmd/warden approve --key warden-local/bob.key --id bob@tenant-a --decision N
+go run ./cmd/warden call --tool warden.resume --args '{"decision_seq":N}'
+go run ./cmd/warden call --tool web.fetch --args '{"url":"https://shop.example"}'
+go run ./cmd/warden call --tool mail.send --args '{"to":"x@tenant-a.example","body":"hi"}'
+#   -> Denied by Warden (rule "no_email_while_tainted")
+```
+
+Stop `serve` with Ctrl+C (it writes a final checkpoint), then check the evidence:
+
+```sh
+go run ./cmd/warden export --out warden-local/receipts.jsonl   # prints the verify command
+```
+
+`warden-local/` holds private keys and is ignored by git; delete it to start over.
+
+## Attack it
+
+```sh
+go run ./cmd/warden-gate
+```
+
+Runs 25 attacks, each against a fresh, complete deployment: an agent connecting over
+MCP with mutual TLS, the gateway, the approver API, and real MCP tool servers that
+count every execution. A scenario passes only if Warden refuses for the right reason
+**and** the tool never ran. Covered: calls no policy permits, wrong roles, unreviewed
+tools, and wrongly typed arguments; resuming early, self-approval, untrusted approvers,
+approvals for different arguments, replays, another agent resuming, and expired or
+rejected approvals; tool descriptions or schemas changed after review (including
+between approval and execution) and tools added later; a failed receipt store, a
+missing tool credential, a dead tool server, a client without a credential, a forged
+identity header; and an edited receipt log. It exits `1` if any defense fails, and
+`go test ./...` runs the same gate.
+
 ## What works today
 
 - **Hybrid post-quantum signatures:** composite ML-DSA-65 + Ed25519, per
@@ -59,9 +118,15 @@ command again to see what Warden catches. Delete `demo-output/` to run the demo 
   mutual TLS 1.3, proving their task credential with its key; pinned tools appear as
   `server.tool`. Warden reaches tool servers as an MCP client and delivers their
   credentials itself.
+- **`warden` binary:** `init`, `pin`, `add-approver`, `issue-task`, `serve`, `call`,
+  `approve`, and `export`. The approver API authenticates signed requests, and
+  `warden approve` checks the arguments it shows against the decision's commitment
+  before signing.
+- **Attack gate (`cmd/warden-gate`):** 25 authorization, approval, tool-poisoning,
+  fail-closed, identity, and evidence attacks against the full stack, all refused.
 
-Not yet: the `warden` server binary and `warden approve` CLI, RFC 3161 anchoring, key
-rotation and revocation, and the benchmark.
+Not yet: RFC 3161 anchoring, key rotation and revocation, full output inspection, and
+the benchmark.
 
 ## Verify a receipt log
 
