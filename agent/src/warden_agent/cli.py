@@ -6,10 +6,12 @@ import argparse
 import asyncio
 import os
 import sys
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 
 from . import scenarios as sc
-from .loop import SYSTEM_PROMPT, RunResult, Transcript, run
+from .direct import connect_direct
+from .loop import SYSTEM_PROMPT, RunResult, ToolBackend, Transcript, run
 from .models import AnthropicModel, Model, OpenAICompatibleModel, ScriptModel
 from .warden import connect
 
@@ -48,6 +50,22 @@ def _parser() -> argparse.ArgumentParser:
         "--check",
         action="store_true",
         help="with --scenario, exit 3 if Warden answered any scenario call differently than expected",
+    )
+    r.add_argument(
+        "--direct",
+        action="store_true",
+        help="benchmark baseline: call the tool servers directly, holding their credentials, with no Warden",
+    )
+    r.add_argument(
+        "--tools-url", default="http://127.0.0.1:9100", help="with --direct: tool servers base URL"
+    )
+    r.add_argument(
+        "--servers", default="crm,payments,web,mail,tickets,hr", help="with --direct: server names"
+    )
+    r.add_argument(
+        "--payments-token-env",
+        default="EXAMPLE_PAYMENTS_TOKEN",
+        help="with --direct: environment variable holding the payments token the agent itself sends",
     )
     connection(r)
 
@@ -88,7 +106,21 @@ def _print_run(result: RunResult) -> None:
         print(f"agent: {result.final_text.strip()}")
 
 
+def _backend(args: argparse.Namespace) -> AbstractAsyncContextManager[ToolBackend]:
+    if not args.direct:
+        return connect(args.url, args.ca, args.cert, args.key)
+    token = os.environ.get(args.payments_token_env)
+    if not token:
+        raise SystemExit(
+            f"set {args.payments_token_env}: in the baseline the agent holds the tool credential itself"
+        )
+    servers = [s for s in args.servers.split(",") if s]
+    return connect_direct(args.tools_url, servers, {"payments": {"Authorization": f"Bearer {token}"}})
+
+
 async def _run(args: argparse.Namespace) -> int:
+    if args.direct and args.check:
+        raise SystemExit("--check compares Warden's answers; it does not apply to --direct")
     scenario = None
     if args.scenario:
         scenario = sc.load_dir(args.scenarios_dir).get(args.scenario)
@@ -96,9 +128,11 @@ async def _run(args: argparse.Namespace) -> int:
             raise SystemExit(f"no scenario {args.scenario!r} in {args.scenarios_dir}")
     model = _model(args, scenario)
     task = scenario.task if scenario else args.task
-    print(f"{model.adapter} / {model.model}: {task}")
+    mode = "direct (no Warden)" if args.direct else "through Warden"
+    print(f"{model.adapter} / {model.model}, {mode}: {task}")
     with Transcript(args.transcript) as log:
-        async with connect(args.url, args.ca, args.cert, args.key) as tools:
+        log.write("backend", mode="direct" if args.direct else "warden")
+        async with _backend(args) as tools:
             result = await run(
                 model, tools, task, system=SYSTEM_PROMPT, max_steps=args.max_steps, transcript=log
             )
@@ -108,8 +142,17 @@ async def _run(args: argparse.Namespace) -> int:
         for rep in reports:
             mark = "!" if rep.step.attack else " "
             seen = rep.outcome if rep.attempted else "not attempted"
-            print(f"  {mark} scenario step {rep.step.call}: {seen} (Warden must: {rep.step.expect})")
-        print(f"{scenario.id}: {sc.summarize(scenario, reports)}")
+            print(f"  {mark} scenario step {rep.step.call}: {seen} (with Warden: {rep.step.expect})")
+        if args.direct and scenario.category != "benign":
+            attacks = [r for r in reports if r.step.attack]
+            tried = [r for r in attacks if r.attempted]
+            succeeded = [r for r in tried if r.outcome == "ok"]
+            print(
+                f"{scenario.id}: no Warden; model attempted {len(tried)}/{len(attacks)} attack call(s), "
+                f"{len(succeeded)} succeeded"
+            )
+        else:
+            print(f"{scenario.id}: {sc.summarize(scenario, reports)}")
         if args.check:
             problems = sc.check(reports, require_all=model.adapter == "script")
             for p in problems:

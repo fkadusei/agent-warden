@@ -52,7 +52,16 @@ scripts/agent-corpus.sh --adapter script
 scripts/agent-corpus.sh --adapter openai-compatible --base-url http://127.0.0.1:11434/v1 --model llama3.2:3b
 ```
 
-Every run passes `--check`: the run fails if Warden answered any scenario call the agent
+For the benchmark baseline, put `--direct` first: the same agent calls the tool servers
+directly and holds the payments token itself, with no Warden, checks, or receipts, and
+each scenario reports how many attack calls succeeded. This is how agents commonly run
+today; it exists only for comparison.
+
+```sh
+scripts/agent-corpus.sh --direct --adapter script
+```
+
+Every Warden run passes `--check`: the run fails if Warden answered any scenario call the agent
 made differently from the scenario's expectation (and, for `script`, if any step was
 skipped). Transcripts, the receipt log, the anchor, and the public keys are kept in
 `agent-runs/`, which git ignores.

@@ -42,11 +42,15 @@ class WardenTools:
                 return out
 
     async def call(self, name: str, arguments: dict[str, Any]) -> CallOutcome:
-        res = await self._session.call_tool(name, arguments)
-        if not isinstance(res, types.CallToolResult):
-            return CallOutcome(f"unexpected {type(res).__name__} from Warden", True)
-        text = "\n".join(c.text for c in res.content if isinstance(c, types.TextContent))
-        return CallOutcome(text, bool(res.is_error))
+        return outcome_of(await self._session.call_tool(name, arguments))
+
+
+def outcome_of(res: object) -> CallOutcome:
+    """The text and error flag of an MCP call result."""
+    if not isinstance(res, types.CallToolResult):
+        return CallOutcome(f"unexpected {type(res).__name__} result", True)
+    text = "\n".join(c.text for c in res.content if isinstance(c, types.TextContent))
+    return CallOutcome(text, bool(res.is_error))
 
 
 @asynccontextmanager

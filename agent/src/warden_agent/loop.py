@@ -48,6 +48,8 @@ class CallRecord:
     # ok, denied, pending_approval, refused, tool_error, error, or invalid_call
     outcome: str
     text: str
+    # Wall-clock time of the call through the backend; 0 for calls never sent.
+    duration_ms: float = 0.0
 
 
 @dataclass
@@ -143,15 +145,25 @@ async def run(
         answers: list[ToolResult] = []
         for call in turn.tool_calls:
             tool = to_mcp.get(call.name)
+            duration_ms = 0.0
             if call.error or tool is None:
                 text, is_error, outcome = call.error or f"unknown tool {call.name!r}", True, "invalid_call"
                 record_tool = tool or call.name
             else:
+                started = time.perf_counter()
                 answer = await backend.call(tool, call.arguments)
+                duration_ms = (time.perf_counter() - started) * 1000
                 text, is_error = answer.text, answer.is_error
                 outcome, record_tool = classify(text, is_error), tool
-            result.calls.append(CallRecord(record_tool, call.arguments, outcome, text))
-            log.write("tool_call", tool=record_tool, arguments=call.arguments, outcome=outcome, result=text)
+            result.calls.append(CallRecord(record_tool, call.arguments, outcome, text, duration_ms))
+            log.write(
+                "tool_call",
+                tool=record_tool,
+                arguments=call.arguments,
+                outcome=outcome,
+                duration_ms=round(duration_ms, 3),
+                result=text,
+            )
             answers.append(ToolResult(call.id, call.name, text, is_error))
         history.append(answers)
 
