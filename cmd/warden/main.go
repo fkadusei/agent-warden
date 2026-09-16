@@ -38,6 +38,7 @@ commands:
   serve         run the agent MCP endpoint and the approver API
   call          act as an agent: --list tools or --tool NAME --args JSON
   approve       list pending calls, or --decision N to approve (or --reject) one
+  console       a local page: what was decided, what waits for a person, and the evidence
   export        write the receipt log for warden-verify
 
 Run "warden <command> -h" for a command's flags.
@@ -56,6 +57,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		"serve":        cmdServe,
 		"call":         cmdCall,
 		"approve":      cmdApprove,
+		"console":      cmdConsole,
 		"export":       cmdExport,
 	}
 	cmd, ok := commands[args[0]]

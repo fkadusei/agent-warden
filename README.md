@@ -178,6 +178,27 @@ OpenAI-compatible endpoint (OpenAI, Ollama, vLLM, LM Studio). `warden-bench` run
 whole corpus with and without Warden and writes the table above. `--adapter script`
 replays a scenario's calls with no model at all.
 
+## Watch it in a browser
+
+```sh
+go run ./cmd/warden export --out warden-local/live.jsonl
+go run ./cmd/warden console --log warden-local/live.jsonl --chain CHAIN_ID \
+  --keys warden-local/keys.json --anchor warden-local/data/anchor.jsonl \
+  --key warden-local/bob.key --id bob@tenant-a        # omit both to stay read-only
+```
+
+A local page showing what Warden decided, what is waiting for a person, and whether the
+log still verifies — approve or reject a held call with a button instead of a command.
+Export works while `serve` is running, so refreshing the view costs one command.
+
+It is an operator tool, not a service (ADR-0015): it binds to loopback, the printed link
+carries a one-off token that every API call requires, and it can only approve when you
+pass an approver key — without `--key` it is read-only. Approvals go through the same
+path as `warden approve`: the arguments are checked against the decision receipt's
+commitment and the call digest is computed locally, so a compromised Warden cannot get a
+different call signed. While it runs, the approver key is in its memory; don't leave it
+running with a key on a shared machine.
+
 ## Verify a receipt log
 
 ```sh

@@ -26,6 +26,12 @@
 /bin/
 /dist/
 *.test
+# Binaries from `go build ./cmd/NAME` at the repository root
+/warden
+/warden-verify
+/warden-demo
+/warden-gate
+/example-tools
 *.out
 coverage.*
 

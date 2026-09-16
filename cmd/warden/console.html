@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warden console</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #fafaf8; --panel: #ffffff; --ink: #1d232e; --muted: #5d6573; --line: #e3e5ea;
+    --accent: #2f5fd0; --accent-soft: #edf2fd; --accent-line: #d3def8;
+    --green: #17703f; --green-soft: #e9f5ee; --green-line: #c8e6d3;
+    --amber: #8f6200; --amber-soft: #fdf6e3; --amber-line: #efdfb2;
+    --red: #b3261e; --red-soft: #fcecea; --red-line: #f3cdc8;
+    --code-bg: #f2f3f6;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #0e1116; --panel: #151a22; --ink: #e4e8ee; --muted: #9aa4b1; --line: #262d38;
+      --accent: #86aefc; --accent-soft: #17223a; --accent-line: #2a3d63;
+      --green: #62d09a; --green-soft: #12261d; --green-line: #244735;
+      --amber: #e2b447; --amber-soft: #29210f; --amber-line: #4a3c19;
+      --red: #ff8e85; --red-soft: #2a1614; --red-line: #532824;
+      --code-bg: #1b212b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 var(--sans); }
+  header { border-bottom: 1px solid var(--line); background: var(--panel); padding: 16px 24px; position: sticky; top: 0; z-index: 2; }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
+  header .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  main { padding: 22px 24px 80px; max-width: 1180px; margin: 0 auto; display: grid; gap: 22px; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .panel { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; overflow: hidden; }
+  .panel .body { padding: 14px 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+  code, .mono { font-family: var(--mono); font-size: .88em; }
+  .tag { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); }
+  .ok { color: var(--green); border-color: var(--green-line); background: var(--green-soft); }
+  .deny { color: var(--red); border-color: var(--red-line); background: var(--red-soft); }
+  .hold { color: var(--amber); border-color: var(--amber-line); background: var(--amber-soft); }
+  .info { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+  .muted { color: var(--muted); }
+  .verify { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .verify .big { font-size: 20px; font-weight: 700; }
+  button { font: inherit; font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button.approve { border-color: var(--green-line); background: var(--green-soft); color: var(--green); }
+  button.reject { border-color: var(--red-line); background: var(--red-soft); color: var(--red); }
+  button:disabled { opacity: .5; cursor: default; }
+  .args { background: var(--code-bg); padding: 6px 10px; border-radius: 6px; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+  .empty { color: var(--muted); padding: 10px 2px; }
+  .err { color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Warden console</h1>
+  <div class="sub" id="sub">loading…</div>
+</header>
+<main>
+  <section class="panel"><div class="body">
+    <h2>Evidence</h2>
+    <div class="verify" id="verify"><span class="muted">checking…</span></div>
+  </div></section>
+
+  <section class="panel"><div class="body">
+    <h2>Waiting for a person</h2>
+    <div id="pending"><span class="muted">…</span></div>
+  </div></section>
+
+  <section class="panel"><div class="body">
+    <h2>What Warden decided</h2>
+    <div id="receipts"><span class="muted">…</span></div>
+  </div></section>
+</main>
+<script>
+  const token = new URLSearchParams(location.search).get("token") || "";
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const tagFor = (outcome) => {
+    const o = String(outcome || "");
+    if (o.startsWith("allow") || o === "ok" || o.startsWith("approved")) return "ok";
+    if (o.startsWith("deny") || o === "error" || o.startsWith("rejected")) return "deny";
+    if (o.startsWith("require")) return "hold";
+    return "info";
+  };
+
+  async function api(path, options) {
+    const res = await fetch(path, {
+      ...options,
+      headers: { "X-Warden-Console-Token": token, "Content-Type": "application/json", ...(options || {}).headers },
+    });
+    if (!res.ok) throw new Error((await res.text()).trim() || res.statusText);
+    return res.json();
+  }
+
+  function renderVerify(v) {
+    const el = document.getElementById("verify");
+    const cls = v.ok ? "ok" : "deny";
+    let extra = "";
+    if (v.ok) {
+      extra = `<span class="muted">${v.receipts} receipts · ${v.checkpoints} anchored checkpoint(s)` +
+        (v.unanchored ? ` · ${v.unanchored} after the last one` : "") +
+        (v.timestamps ? ` · ${v.timestamps} timestamp(s), earliest ${esc(v.earliest_timestamp)}` : "") + `</span>`;
+    }
+    el.innerHTML = `<span class="big ${cls}">${v.ok ? "VERIFIED" : "FAILED"}</span>` +
+      `<span class="${v.ok ? "muted" : "err"}">${esc(v.detail)}</span> ${extra}`;
+  }
+
+  function renderPending(list, mode, err) {
+    const el = document.getElementById("pending");
+    if (err) { el.innerHTML = `<div class="err">${esc(err)}</div>`; return; }
+    if (mode === "read-only") {
+      el.innerHTML = `<div class="empty">This console is read-only. Start it with <code>--key</code> and <code>--id</code> to approve.</div>`;
+      return;
+    }
+    if (!list || !list.length) { el.innerHTML = `<div class="empty">Nothing is waiting.</div>`; return; }
+    el.innerHTML = `<table><thead><tr><th>#</th><th>Call</th><th>Who</th><th>Why it is held</th><th></th></tr></thead><tbody>` +
+      list.map((p) => `
+        <tr>
+          <td class="mono">${p.seq}</td>
+          <td><code>${esc(p.tool)}</code><div class="args mono">${esc(p.args)}</div>
+            <div class="muted" style="margin-top:4px">${p.verified
+              ? "arguments verified against the decision receipt"
+              : '<span class="err">arguments do NOT match the receipt — do not approve</span>'}</div></td>
+          <td>${esc(p.agent)}<div class="muted">for ${esc(p.for)}</div><div class="muted mono">${esc(p.task)}</div></td>
+          <td>${p.rule ? `<span class="tag hold">${esc(p.rule)}</span>` : ""}
+            ${(p.taint || []).map((t) => `<span class="tag info">${esc(t)}</span>`).join(" ")}
+            <div class="muted" style="margin-top:4px">${esc(p.state)}</div></td>
+          <td style="white-space:nowrap">
+            <button class="approve" data-seq="${p.seq}" data-reject="0" ${p.verified ? "" : "disabled"}>Approve</button>
+            <button class="reject" data-seq="${p.seq}" data-reject="1">Reject</button>
+          </td>
+        </tr>`).join("") + `</tbody></table>`;
+
+    el.querySelectorAll("button").forEach((b) => b.addEventListener("click", async () => {
+      el.querySelectorAll("button").forEach((x) => (x.disabled = true));
+      try {
+        await api("/api/approve", { method: "POST", body: JSON.stringify({ seq: Number(b.dataset.seq), reject: b.dataset.reject === "1" }) });
+        await refresh();
+      } catch (e) {
+        el.insertAdjacentHTML("afterbegin", `<div class="err">${esc(e.message)}</div>`);
+        el.querySelectorAll("button").forEach((x) => (x.disabled = false));
+      }
+    }));
+  }
+
+  function renderReceipts(list) {
+    const el = document.getElementById("receipts");
+    if (!list || !list.length) { el.innerHTML = `<div class="empty">No receipts in this log yet.</div>`; return; }
+    el.innerHTML = `<table><thead><tr><th>#</th><th>When</th><th>Type</th><th>Call</th><th>Outcome</th><th>Labels</th></tr></thead><tbody>` +
+      list.map((r) => `
+        <tr>
+          <td class="mono">${r.seq}</td>
+          <td class="mono muted">${esc(r.ts)}</td>
+          <td>${esc(r.type)}</td>
+          <td><code>${esc(r.tool || "")}</code><div class="muted">${esc(r.actor || "")}</div></td>
+          <td>${r.outcome ? `<span class="tag ${tagFor(r.outcome)}">${esc(r.outcome)}</span>` : ""}
+            ${r.rule ? `<div class="muted mono">${esc(r.rule)}</div>` : ""}</td>
+          <td>${(r.taint || []).map((t) => `<span class="tag info">${esc(t)}</span>`).join(" ")}</td>
+        </tr>`).join("") + `</tbody></table>`;
+  }
+
+  async function refresh() {
+    try {
+      const s = await api("/api/state");
+      document.getElementById("sub").innerHTML =
+        `chain <code>${esc(s.chain_id)}</code> · ${s.mode === "approving" ? `approving as <code>${esc(s.approver)}</code>` : "read-only"}`;
+      renderVerify(s.verify);
+      renderPending(s.pending, s.mode, s.pending_error);
+      renderReceipts(s.receipts);
+    } catch (e) {
+      document.getElementById("sub").innerHTML = `<span class="err">${esc(e.message)}</span>`;
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 3000);
+</script>
+</body>
+</html>
