@@ -38,7 +38,7 @@ rejected 10.5 as a whole number. Warden adds roughly 3.5 ms per call here (ident
 pinning, schema, policy, and a hash-chained receipt signed with ML-DSA-65 + Ed25519, all
 on one machine), and each call costs about 8.9 KB of receipts, most of it the
 post-quantum signatures.
-| 4.5 | **Checkpoint anchoring** in benchmark runs (open question 5: public vs. local RFC 3161 TSA) | `internal/checkpoint` | owner decision |
+| 4.5 ✅ | **Checkpoint anchoring** — `internal/tsa` (client, verifier, and a local authority for offline runs); `tsa.url` in `warden.json` stamps each anchored checkpoint over its exact bytes, appending tokens to their own file so existing anchors verify unchanged; `warden-verify --tsa-tokens --tsa-roots` checks them and reports the earliest. Best-effort: an authority that is down is logged, never blocking a call. Open question 5 resolved in ADR-0014 (both: configurable URL, local authority in the demo and tests). The demo now writes `tokens.jsonl` and `tsa-roots.pem`, and its verify command prints `timestamps: 1 verified` | `internal/tsa`, `cmd/warden`, `cmd/warden-verify`, `cmd/warden-demo` | — |
 | 4.6 | **Published results** — a run with a capable model, table in the README with model name and version | `README.md` | 4.4, model access |
 
 ## Honest-reporting rules

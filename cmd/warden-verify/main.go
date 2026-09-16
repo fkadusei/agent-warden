@@ -6,6 +6,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -14,10 +15,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fkadusei/agent-warden/internal/chain"
 	"github.com/fkadusei/agent-warden/internal/checkpoint"
 	"github.com/fkadusei/agent-warden/internal/keys"
+	"github.com/fkadusei/agent-warden/internal/tsa"
 )
 
 const (
@@ -42,6 +45,8 @@ type result struct {
 	LastSeq       *int64  `json:"last_seq,omitempty"`
 	Head          string  `json:"head,omitempty"`
 	Checkpoints   int     `json:"checkpoints"`
+	Timestamps    int     `json:"timestamps,omitempty"`
+	StampedAt     string  `json:"earliest_timestamp,omitempty"`
 	Checkpointed  int64   `json:"checkpointed"`
 	Unanchored    int64   `json:"unanchored"`
 	OpenDecisions []int64 `json:"open_decisions,omitempty"`
@@ -59,9 +64,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	chainID := fs.String("chain", "", "the chain ID the log must belong to (required)")
 	keysPath := fs.String("keys", "", "trusted public keys as a JWK Set (required)")
 	anchorPath := fs.String("anchor", "", "anchored checkpoints, one per line (strongly recommended)")
+	tokensPath := fs.String("tsa-tokens", "", "RFC 3161 timestamps over the anchored checkpoints")
+	tsaRootsPath := fs.String("tsa-roots", "", "certificates trusted to act as timestamp authorities (PEM)")
 	asJSON := fs.Bool("json", false, "print the result as JSON")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: warden-verify --log FILE --chain ID --keys FILE [--anchor FILE] [--json]")
+		fmt.Fprintln(stderr, "usage: warden-verify --log FILE --chain ID --keys FILE [--anchor FILE]"+
+			" [--tsa-tokens FILE --tsa-roots FILE] [--json]")
 		fmt.Fprintln(stderr, "\nExit status: 0 verified, 1 verification failed, 2 usage or file error.")
 		fs.PrintDefaults()
 	}
@@ -118,6 +126,49 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	res.Checkpoints = len(cps)
 
+	if *tokensPath != "" || *tsaRootsPath != "" {
+		if *tokensPath == "" || *tsaRootsPath == "" || *anchorPath == "" {
+			return usageErr("--tsa-tokens and --tsa-roots go together, and need --anchor")
+		}
+		roots, err := tsa.LoadRoots(*tsaRootsPath)
+		if err != nil {
+			return usageErr("%v", err)
+		}
+		tokenData, err := os.ReadFile(*tokensPath)
+		if err != nil {
+			return usageErr("%v", err)
+		}
+		tokens, err := tsa.ReadTokens(bytes.NewReader(tokenData))
+		if err != nil {
+			return usageErr("%v", err)
+		}
+		anchorData, err := os.ReadFile(*anchorPath)
+		if err != nil {
+			return usageErr("%v", err)
+		}
+		var earliest time.Time
+		for n, line := range bytes.Split(bytes.TrimSpace(anchorData), []byte("\n")) {
+			if len(bytes.TrimSpace(line)) == 0 {
+				continue
+			}
+			// A token must cover the anchored bytes exactly; anything else fails.
+			for _, token := range tokens[tsa.Digest(line)] {
+				when, err := tsa.Verify(token, line, roots)
+				if err != nil {
+					res.Stage, res.Error = "timestamp", fmt.Sprintf("anchor line %d: %v", n+1, err)
+					return emit(exitFailed)
+				}
+				res.Timestamps++
+				if earliest.IsZero() || when.Before(earliest) {
+					earliest = when
+				}
+			}
+		}
+		if !earliest.IsZero() {
+			res.StampedAt = earliest.UTC().Format(time.RFC3339)
+		}
+	}
+
 	lf, err := os.Open(*logPath)
 	if err != nil {
 		return usageErr("%v", err)
@@ -169,6 +220,9 @@ func printText(w io.Writer, r result) {
 	if r.Checkpoints > 0 {
 		row("checkpointed", fmt.Sprintf("%d receipts (%d anchored checkpoints)", r.Checkpointed, r.Checkpoints))
 		row("unanchored", fmt.Sprintf("%d receipts after the last checkpoint", r.Unanchored))
+		if r.Timestamps > 0 {
+			row("timestamps", fmt.Sprintf("%d verified, earliest %s", r.Timestamps, r.StampedAt))
+		}
 	} else {
 		row("checkpointed", "none")
 	}

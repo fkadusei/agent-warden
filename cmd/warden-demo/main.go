@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,7 @@ import (
 	"github.com/fkadusei/agent-warden/internal/receipt"
 	"github.com/fkadusei/agent-warden/internal/registry"
 	"github.com/fkadusei/agent-warden/internal/store"
+	"github.com/fkadusei/agent-warden/internal/tsa"
 )
 
 const (
@@ -394,6 +396,33 @@ func run(out string, w io.Writer) (*result, error) {
 	if err := (checkpoint.FileAnchor{Path: res.Anchor}).Publish(signedCP); err != nil {
 		return nil, err
 	}
+
+	// Timestamp the checkpoint with a local RFC 3161 authority (ADR-0014), so the demo
+	// shows the whole path offline. A real deployment points Warden at a public
+	// authority instead; this one's key and root exist only for this run.
+	tokensPath := filepath.Join(out, "tokens.jsonl")
+	tsaRootsPath := filepath.Join(out, "tsa-roots.pem")
+	authority, err := tsa.NewAuthority("Warden Demo TSA", now.Add(-time.Minute), now.Add(24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
+	tsaServer := httptest.NewServer(authority.Handler())
+	anchorLine, err := signedCP.Line()
+	if err != nil {
+		tsaServer.Close()
+		return nil, err
+	}
+	token, err := (&tsa.Client{URL: tsaServer.URL}).Stamp(ctx, anchorLine)
+	tsaServer.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err := tsa.AppendToken(tokensPath, anchorLine, token); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(tsaRootsPath, authority.RootPEM(), 0o644); err != nil {
+		return nil, err
+	}
 	keySet, err := json.MarshalIndent(keys.Set{Keys: []keys.JWK{keys.PublicJWK(kid, receiptKey.Public())}}, "", "  ")
 	if err != nil {
 		return nil, err
@@ -439,7 +468,8 @@ func run(out string, w io.Writer) (*result, error) {
 
 	fmt.Fprintf(w, "Wrote %d signed receipts, checkpointed %d of them, to %s/\n\n", rep.Receipts, rep.Checkpointed, out)
 	verify := func(log string) string {
-		return fmt.Sprintf("go run ./cmd/warden-verify --log %s --chain %s --keys %s --anchor %s", log, res.ChainID, res.Keys, res.Anchor)
+		return fmt.Sprintf("go run ./cmd/warden-verify --log %s --chain %s --keys %s --anchor %s"+
+			" --tsa-tokens %s --tsa-roots %s", log, res.ChainID, res.Keys, res.Anchor, tokensPath, tsaRootsPath)
 	}
 	fmt.Fprintln(w, "Verify the log yourself (expect VERIFIED):")
 	fmt.Fprintf(w, "  %s\n\n", verify(res.Log))
@@ -448,7 +478,8 @@ func run(out string, w io.Writer) (*result, error) {
 		fmt.Fprintf(w, "  %s\n", verify(res.Tampered[name]))
 	}
 	fmt.Fprintln(w, "\nOr edit receipts.jsonl by hand and run the first command again.")
-	fmt.Fprintln(w, "Note: the tools and the payments secret are simulated; everything else is the real pipeline.")
+	fmt.Fprintln(w, "Note: the tools, the payments secret, and the timestamp authority are simulated"+
+		" (the authority runs locally for this run); everything else is the real pipeline.")
 	return res, nil
 }
 

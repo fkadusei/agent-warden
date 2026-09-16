@@ -157,7 +157,10 @@ showed different histories to different verifiers.
 **Mitigation.** Warden periodically emits **signed checkpoints** (log size + root
 hash) and sends them **outside its own control** — an external anchor such as a
 witness, a separate write-once store, or an RFC 3161 timestamping authority. A
-verifier compares the log against the latest anchored checkpoint.
+verifier compares the log against the latest anchored checkpoint. With `tsa.url`
+configured (ADR-0014), each anchored checkpoint is also stamped by an authority that
+is not Warden, over the exact anchored bytes; `warden-verify --tsa-tokens --tsa-roots`
+checks those tokens, so a Warden that backdates its own clock is caught.
 **Test.** Truncate the log after an anchored checkpoint; rewrite and re-sign the
 whole log with the real key — `warden-verify` fails both against the anchored
 checkpoint.
@@ -185,6 +188,11 @@ litigation holds). A future quantum computer could forge classical signatures,
 making an old Ed25519-only log deniable.
 **Mitigation.** Receipts use a **hybrid ML-DSA-65 + Ed25519** composite signature
 (ADR-0002). The receipt remains unforgeable as long as either component holds.
+**Not covered.** RFC 3161 timestamps (ADR-0014) are outside this guarantee: the
+authority signs with its own key, in practice RSA or ECDSA, which Warden does not
+choose. A timestamp narrows backdating today; against an adversary who breaks
+classical signatures it stops being evidence, while the receipts and checkpoints
+themselves do not.
 **Test.** Verification fails if either component signature is altered or stripped
 (no downgrade to a single component).
 

@@ -2,6 +2,10 @@ github.com/cedar-policy/cedar-go v1.8.0 h1:9gcU7EHXwHC2RMdpph68yTAkdB3behTTssC+k
 github.com/cedar-policy/cedar-go v1.8.0/go.mod h1:h5+3CVW1oI5LXVskJG+my9TFCYI5yjh/+Ul3EJie6MI=
 github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/digitorus/pkcs7 v0.0.0-20260914070511-d678ea5ea03f h1:LBDTasGDT7gkpSl3tIq+V4Yy0nr+l+ZmI6VN9MY9FU0=
+github.com/digitorus/pkcs7 v0.0.0-20260914070511-d678ea5ea03f/go.mod h1:OQvyvldkvDCxGsUPLSibXqM4B/Pz5RaXQP4CPo5LXs4=
+github.com/digitorus/timestamp v0.0.0-20260914073129-b4b58b92aa51 h1:C5oJXjXaNiSSCs4b+yXP3JmMGKgJhuIakXD0UdjhB2k=
+github.com/digitorus/timestamp v0.0.0-20260914073129-b4b58b92aa51/go.mod h1:UbWLJjUt4ChMltkeZK0SKTUViVg4839mnQmyH8QWH+Y=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=

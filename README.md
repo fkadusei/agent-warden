@@ -168,6 +168,14 @@ bin/warden-verify --log receipts.jsonl --chain CHAIN_ID --keys trusted-keys.json
 Exit status is `0` when the log verifies, `1` when verification fails, and `2` for
 usage or file errors. Add `--json` for machine-readable output.
 
+If Warden was configured with a timestamp authority (`tsa.url`), add
+`--tsa-tokens tokens.jsonl --tsa-roots tsa-roots.pem`: each anchored checkpoint's
+RFC 3161 timestamp is checked against the exact anchored bytes, and the report names
+the earliest. That is evidence about *when* a checkpoint existed from a party other
+than Warden, so a Warden that backdates its own clock is caught. The authority signs
+with its own classical key, so this is not part of the post-quantum guarantee
+(ADR-0014).
+
 ## Run the tests
 
 ```sh

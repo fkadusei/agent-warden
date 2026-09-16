@@ -334,7 +334,7 @@ agent ◄──result (tagged)───┘</code></pre>
   <li><s>Certificate signatures</s> — <strong>decided: plain ML-DSA-65</strong> (ADR-0008). The UUID-based OID <code>2.25.319797216735078154913038669087058524786</code> is Warden's arc for certificate policies, and the Ed25519 key is bound by SAN URI (ADR-0010).</li>
   <li><strong>Draft churn.</strong> The composite draft is at -04. If the construction changes, the receipt <code>v</code> and <code>alg</code> must change with it. Is pinning <code>alg_ref</code> in the protected header enough?</li>
   <li><strong>SLH-DSA for checkpoints?</strong> Hash-based, larger and slower, more conservative — is there a case for using it for checkpoints only, since they are few and long-lived?</li>
-  <li><strong>Checkpoint anchor for the demo.</strong> RFC 3161 needs a TSA; use a public TSA, or run a local one and document the trade-off?</li>
+  <li><s>Checkpoint anchor for the demo</s> — <strong>decided: both</strong> (ADR-0014). The timestamp authority is configuration (<code>tsa.url</code>), so a deployment can point at a public one; the demo, tests, and benchmark run a local authority and stay offline. Timestamps are optional and best-effort: they never block a call, and the chain and checkpoints do not depend on them.</li>
 </ol>
 
 <h2 id="stack">9. Tech stack (ADR-0006)</h2>

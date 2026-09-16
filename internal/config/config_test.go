@@ -65,6 +65,26 @@ func TestLabel(t *testing.T) {
 	}
 }
 
+// Timestamping is optional: absent means off, and a configured authority gets
+// defaults for how long to wait and where tokens go.
+func TestTSA(t *testing.T) {
+	plain, err := Load(write(t, good))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.TSA != nil {
+		t.Fatalf("tsa is %+v without a tsa section", plain.TSA)
+	}
+	c, err := Load(write(t, strings.Replace(good, `"taint": {"web": "web"}`,
+		`"taint": {"web": "web"}, "tsa": {"url": "https://tsa.example/tsr"}`, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TSA.URL != "https://tsa.example/tsr" || c.TSA.Timeout.Duration != 10*time.Second || c.TSA.Tokens != "data/tokens.jsonl" {
+		t.Fatalf("tsa defaults: %+v", c.TSA)
+	}
+}
+
 func TestLoadRejects(t *testing.T) {
 	cases := map[string]string{
 		"unknown field":      strings.Replace(good, `"kid": "k1"`, `"kid": "k1", "debug": true`, 1),
@@ -78,6 +98,9 @@ func TestLoadRejects(t *testing.T) {
 		"tool_taint nested":  strings.Replace(good, `"taint": {"web": "web"}`, `"tool_taint": {"crm/a/b": "pii"}`, 1),
 		"tool_taint empty":   strings.Replace(good, `"taint": {"web": "web"}`, `"tool_taint": {"crm/lookup": ""}`, 1),
 		"taint empty label":  strings.Replace(good, `"taint": {"web": "web"}`, `"taint": {"web": ""}`, 1),
+		"tsa without a url":  strings.Replace(good, `"taint": {"web": "web"}`, `"tsa": {"timeout": "5s"}`, 1),
+		"tsa bad url":        strings.Replace(good, `"taint": {"web": "web"}`, `"tsa": {"url": "ftp://tsa.example"}`, 1),
+		"tsa short timeout":  strings.Replace(good, `"taint": {"web": "web"}`, `"tsa": {"url": "https://tsa.example", "timeout": "10ms"}`, 1),
 	}
 	for name, data := range cases {
 		t.Run(name, func(t *testing.T) {

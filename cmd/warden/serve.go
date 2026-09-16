@@ -28,6 +28,7 @@ import (
 	"github.com/fkadusei/agent-warden/internal/receipt"
 	"github.com/fkadusei/agent-warden/internal/registry"
 	"github.com/fkadusei/agent-warden/internal/store"
+	"github.com/fkadusei/agent-warden/internal/tsa"
 	"github.com/fkadusei/agent-warden/internal/upstream"
 )
 
@@ -162,7 +163,7 @@ func serve(ctx context.Context, cfg *config.Config, out io.Writer, ready func(ad
 	go func() { errc <- agentSrv.ServeTLS(agentLn, "", "") }()
 	go func() { errc <- approverSrv.ServeTLS(approverLn, "", "") }()
 
-	cp, err := newCheckpointer(st, receiptKey, cfg)
+	cp, err := newCheckpointer(st, receiptKey, cfg, out)
 	if err != nil {
 		agentSrv.Close()
 		approverSrv.Close()
@@ -176,6 +177,9 @@ func serve(ctx context.Context, cfg *config.Config, out io.Writer, ready func(ad
 	fmt.Fprintf(out, "Warden serving chain %s\n  agents (MCP, mutual TLS): https://%s\n  approvers:                https://%s\n",
 		cfg.ChainID, agentLn.Addr(), approverLn.Addr())
 	fmt.Fprintf(out, "  tools exposed: %v\n", exposed.Tools)
+	if cfg.TSA != nil {
+		fmt.Fprintf(out, "  timestamps:               %s\n", cfg.TSA.URL)
+	}
 	for id, reason := range exposed.Withheld {
 		fmt.Fprintf(out, "  withheld %s: %s\n", id, reason)
 	}
@@ -230,17 +234,26 @@ type checkpointer struct {
 	chain  string
 	anchor string
 	policy checkpoint.Policy
+	// stamp, when set, timestamps each anchored checkpoint (ADR-0014); tokens is
+	// where those timestamps are appended, and out carries warnings.
+	stamp  *tsa.Client
+	tokens string
+	out    io.Writer
 
 	mu       sync.Mutex
 	lastSize int64
 	lastAt   time.Time
 }
 
-func newCheckpointer(st *store.Store, key *composite.PrivateKey, cfg *config.Config) (*checkpointer, error) {
+func newCheckpointer(st *store.Store, key *composite.PrivateKey, cfg *config.Config, out io.Writer) (*checkpointer, error) {
 	c := &checkpointer{
 		st: st, key: key, kid: cfg.Kid, chain: cfg.ChainID, anchor: cfg.Path(cfg.Anchor),
 		policy: checkpoint.Policy{Every: cfg.CheckpointEvery, Interval: cfg.CheckpointInterval.Duration},
-		lastAt: time.Now(),
+		lastAt: time.Now(), out: out,
+	}
+	if cfg.TSA != nil {
+		c.stamp = &tsa.Client{URL: cfg.TSA.URL, HTTP: &http.Client{Timeout: cfg.TSA.Timeout.Duration}}
+		c.tokens = cfg.Path(cfg.TSA.Tokens)
 	}
 	data, err := os.ReadFile(c.anchor)
 	if errors.Is(err, os.ErrNotExist) {
@@ -308,5 +321,25 @@ func (c *checkpointer) checkpoint(ctx context.Context, force bool) error {
 		return err
 	}
 	c.lastSize, c.lastAt = cp.Size, now
+	if c.stamp != nil {
+		// The checkpoint is already anchored; a timestamp is extra evidence about
+		// when, so an authority that is down never stops Warden (ADR-0014).
+		if err := c.timestamp(ctx, signed); err != nil {
+			fmt.Fprintf(c.out, "timestamp failed (the checkpoint is anchored): %v\n", err)
+		}
+	}
 	return nil
+}
+
+// timestamp asks the configured authority to stamp the exact bytes just anchored.
+func (c *checkpointer) timestamp(ctx context.Context, signed *receipt.Signed) error {
+	line, err := signed.Line()
+	if err != nil {
+		return err
+	}
+	token, err := c.stamp.Stamp(ctx, line)
+	if err != nil {
+		return err
+	}
+	return tsa.AppendToken(c.tokens, line, token)
 }

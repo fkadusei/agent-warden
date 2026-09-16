@@ -78,6 +78,9 @@ type Config struct {
 	// "pii" for a customer lookup; it takes precedence over the server's label.
 	ToolTaint map[string]string `json:"tool_taint,omitempty"`
 
+	// TSA, if set, timestamps each checkpoint with an RFC 3161 authority (ADR-0014).
+	TSA *TSA `json:"tsa,omitempty"`
+
 	Servers []Server `json:"servers"`
 
 	dir string
@@ -108,6 +111,14 @@ func Load(path string) (*Config, error) {
 	}
 	if c.CheckpointInterval.Duration == 0 {
 		c.CheckpointInterval.Duration = time.Minute
+	}
+	if c.TSA != nil {
+		if c.TSA.Timeout.Duration == 0 {
+			c.TSA.Timeout.Duration = 10 * time.Second
+		}
+		if c.TSA.Tokens == "" {
+			c.TSA.Tokens = "data/tokens.jsonl"
+		}
 	}
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
@@ -150,7 +161,24 @@ func (c *Config) validate() error {
 			return errors.New("taint entries need a server and a label")
 		}
 	}
+	if c.TSA != nil {
+		if !strings.HasPrefix(c.TSA.URL, "http://") && !strings.HasPrefix(c.TSA.URL, "https://") {
+			return errors.New("tsa.url must be an http or https URL")
+		}
+		if c.TSA.Timeout.Duration < time.Second {
+			return errors.New("tsa.timeout must be at least 1s")
+		}
+	}
 	return nil
+}
+
+// TSA is an RFC 3161 timestamp authority. Timestamps are evidence about when a
+// checkpoint existed; Warden keeps working when the authority does not (ADR-0014).
+type TSA struct {
+	URL     string   `json:"url"`
+	Timeout Duration `json:"timeout,omitempty"`
+	// Tokens is where timestamps are appended, beside the anchor.
+	Tokens string `json:"tokens,omitempty"`
 }
 
 // Label returns the taint label a tool's output adds: its tool_taint entry if

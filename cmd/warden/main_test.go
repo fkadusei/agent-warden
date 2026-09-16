@@ -15,6 +15,7 @@ import (
 	"github.com/fkadusei/agent-warden/internal/config"
 	"github.com/fkadusei/agent-warden/internal/exampletools"
 	"github.com/fkadusei/agent-warden/internal/keys"
+	"github.com/fkadusei/agent-warden/internal/tsa"
 )
 
 func runOK(t *testing.T, stdin string, args ...string) string {
@@ -53,6 +54,16 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Listen, cfg.ApproverListen = "127.0.0.1:0", "127.0.0.1:0"
+
+	// Timestamp checkpoints with a local RFC 3161 authority (ADR-0014).
+	authority, err := tsa.NewAuthority("Test TSA", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsaServer := httptest.NewServer(authority.Handler())
+	defer tsaServer.Close()
+	cfg.TSA = &config.TSA{URL: tsaServer.URL, Timeout: config.Duration{Duration: 10 * time.Second},
+		Tokens: filepath.Join(dir, "data", "tokens.jsonl")}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ready := make(chan addrs, 1)
@@ -153,6 +164,33 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if bytes.Contains(logData, []byte(token)) {
 		t.Fatal("the receipt log contains the payments token")
+	}
+
+	// Every anchored checkpoint carries a timestamp from the authority, over exactly
+	// the anchored bytes.
+	tokenData, err := os.ReadFile(cfg.Path(cfg.TSA.Tokens))
+	if err != nil {
+		t.Fatalf("no timestamps were written: %v", err)
+	}
+	tokens, err := tsa.ReadTokens(bytes.NewReader(tokenData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamped := 0
+	for _, line := range bytes.Split(bytes.TrimSpace(anchorData), []byte("\n")) {
+		for _, tok := range tokens[tsa.Digest(line)] {
+			when, err := tsa.Verify(tok, line, authority.Roots())
+			if err != nil {
+				t.Fatalf("timestamp over an anchored checkpoint: %v", err)
+			}
+			if time.Since(when) > time.Hour {
+				t.Fatalf("timestamp %s is not from this run", when)
+			}
+			stamped++
+		}
+	}
+	if stamped != len(cps) {
+		t.Fatalf("%d timestamps for %d anchored checkpoints", stamped, len(cps))
 	}
 }
 

@@ -299,6 +299,14 @@ the report states its size. Because ML-DSA signatures are randomized, re-signing
 any receipt changes its bytes, so a rewrite can't reproduce a checkpointed prefix
 even with the key.
 
+**Timestamps (ADR-0014).** Every timestamp so far is Warden's own, so a Warden that
+backdates its clock still produces a consistent log. With `tsa.url` configured, each
+anchored checkpoint is also stamped by an RFC 3161 authority over the exact anchored
+bytes, and the token is appended to a separate file. `warden-verify --tsa-tokens
+--tsa-roots` then checks those tokens and reports the earliest. The authority signs
+with its own classical key, so a timestamp narrows backdating today but is not part of
+Warden's post-quantum guarantee; anchoring is best-effort and never blocks a call.
+
 ## 6. Benchmark
 
 The number that goes in the README: attack success rate **without** Warden vs.
@@ -343,8 +351,11 @@ with the model name and version, because they change with the model.
 4. **Stateful ML-DSA alternatives.** Is there a case for SLH-DSA (hash-based, larger
    and slower, more conservative) for checkpoints only, since they are few and
    long-lived?
-5. **Checkpoint anchor for the demo.** RFC 3161 needs a TSA; use a public TSA, or run
-   a local one and document the trade-off?
+5. ~~Checkpoint anchor for the demo~~ — **decided: both** (ADR-0014). The timestamp
+   authority is configuration (`tsa.url`), so a deployment can point at a public one;
+   the demo, tests, and benchmark run a local authority so they stay offline and
+   reproducible. Timestamps are optional and best-effort: they never block a call, and
+   the chain and checkpoints do not depend on them.
 
 ## 9. Tech stack (ADR-0006)
 

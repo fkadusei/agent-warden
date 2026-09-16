@@ -4,6 +4,7 @@ go 1.27
 
 require (
 	github.com/cedar-policy/cedar-go v1.8.0
+	github.com/digitorus/timestamp v0.0.0-20260914073129-b4b58b92aa51
 	github.com/google/jsonschema-go v0.4.3
 	github.com/gowebpki/jcs v1.0.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -11,6 +12,7 @@ require (
 )
 
 require (
+	github.com/digitorus/pkcs7 v0.0.0-20260914070511-d678ea5ea03f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
