@@ -209,10 +209,13 @@ trustworthy even after a cryptographically relevant quantum computer exists.
 
 ## Read in this order
 
-1. [`docs/threat-model.md`](docs/threat-model.md) — what Warden defends against, and what it doesn't
-2. [`docs/design.md`](docs/design.md) — components, the receipt format, verification
-3. [`docs/benchmark.html`](docs/benchmark.html) — the with/without comparison, per scenario
-4. [`docs/decisions/`](docs/decisions/) — why each choice was made (ADRs 0001–0014)
+1. [`docs/writeup.md`](docs/writeup.md) — the argument in one sitting: why policy rather than
+   detection, what the evidence is for, what the numbers do and don't show
+   ([HTML](docs/writeup.html))
+2. [`docs/threat-model.md`](docs/threat-model.md) — what Warden defends against, and what it doesn't
+3. [`docs/design.md`](docs/design.md) — components, the receipt format, verification
+4. [`docs/benchmark.html`](docs/benchmark.html) — the with/without comparison, per scenario
+5. [`docs/decisions/`](docs/decisions/) — why each choice was made (ADRs 0001–0014)
 
 ## License
 
