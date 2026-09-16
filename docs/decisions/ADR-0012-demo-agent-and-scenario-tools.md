@@ -1,6 +1,6 @@
 # ADR-0012: Demo agent, scenario tools, and the scripted gate
 
-- **Status:** Proposed
+- **Status:** Accepted (owner, 2026-09-16)
 - **Date:** 2026-09-15
 - **Related:** threats W1, W3, W4; ADR-0006 (tech stack); design §6, §7, §9;
   Phase 3 plan

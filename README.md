@@ -11,9 +11,11 @@ verify offline.
 
 The agent is untrusted by design: it proposes actions, and Warden decides them.
 
-> **Status: Phase 4 complete.** The gateway runs as a real MCP server, the attack gate
-> passes, and the with/without-Warden benchmark is published below. Phase 5 (write-up,
-> demo, CI) is in progress. See [`docs/design.md`](docs/design.md#7-build-phases).
+> **Status: all five phases complete.** The gateway runs as a real MCP server, both attack
+> gates pass, the with/without-Warden benchmark is published below, and the write-up, demo,
+> console, and CI are in place. What is *not* done is listed in
+> [`docs/not-done.md`](docs/not-done.md). See the phases in
+> [`docs/design.md`](docs/design.md#7-build-phases).
 
 ![A call decided, the gate, and the evidence](docs/demo.gif)
 
@@ -123,7 +125,8 @@ agent ──propose──► identify → pin → check args → policy → RECE
   checkpointed into an anchor with RFC 9162 Merkle roots and optional RFC 3161
   timestamps (ADR-0014).
 
-Not yet: key rotation and revocation, richer output inspection, and CI.
+Not yet: key rotation and revocation, and richer output inspection.
+[`docs/not-done.md`](docs/not-done.md) lists every gap, including the structural ones.
 
 ## Run Warden locally
 
@@ -244,7 +247,8 @@ trustworthy even after a cryptographically relevant quantum computer exists.
 3. [`docs/threat-model.md`](docs/threat-model.md) — what Warden defends against, and what it doesn't
 4. [`docs/design.md`](docs/design.md) — components, the receipt format, verification
 5. [`docs/benchmark.html`](docs/benchmark.html) — the with/without comparison, per scenario
-6. [`docs/decisions/`](docs/decisions/) — why each choice was made (ADRs 0001–0014)
+6. [`docs/not-done.md`](docs/not-done.md) — the gaps, written down rather than left to be found
+7. [`docs/decisions/`](docs/decisions/) — why each choice was made (ADRs 0001–0015)
 
 ## License
 

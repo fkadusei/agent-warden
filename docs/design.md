@@ -336,8 +336,8 @@ with the model name and version, because they change with the model.
 | **1** ✅ | Receipt library: JCS, composite signer, chain, commitments, checkpoints, `warden-verify` | Draft test vectors pass; tamper tests fail verification as expected. **Deferred:** RFC 3161 anchoring, key-epoch certificates, key rotation and revocation, approval receipts |
 | **2** ✅ | Gateway: identity, policy, approvals, broker, registry, write-ahead receipts | `authz`, `approval`, `poison`, fail-closed tests pass (`warden-gate`: 25 attacks refused) |
 | **3** ✅ | Output inspector + demo agent + synthetic tools | `injection`, `exfil`, `deputy` scenarios run end to end (scripted compromised agent: 10/10 attacks blocked, 3/3 benign tasks completed, in `go test` and through `warden serve` with the Python agent) |
-| **4** | Benchmark run with/without Warden; checkpoints + anchoring | Published results table incl. benign completion |
-| **5** | README, demo video, write-up | — |
+| **4** ✅ | Benchmark run with/without Warden; checkpoints + anchoring | Published: 47/62 attack calls succeeded without Warden, 0/62 with it, 20/20 benign both ways (`docs/benchmark.html`); RFC 3161 timestamps on anchored checkpoints (ADR-0014) |
+| **5** ✅ | README, demo video, write-up | `docs/writeup.md`, a recorded demo (`docs/demo.gif`), the `warden console` (ADR-0015), CI on every push, and `docs/not-done.md` |
 
 ## 8. Open questions
 

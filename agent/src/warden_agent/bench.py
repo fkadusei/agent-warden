@@ -197,12 +197,11 @@ def run_mode(
     tools = ToolServers(binaries["example-tools"], token, work / "tools.log")
     records: list[RunRecord] = []
     warden: Warden | None = None
-    try:
-        tools.restart(scenarios[0].id)
-        if mode == "warden":
-            warden = Warden(binaries, work, tools.url, token)
-            warden.pin()
-            warden.start()
+
+    # One event loop for the whole mode. A loop per scenario tore itself down while
+    # httpx's aclose() was still pending, which printed "Event loop is closed" after
+    # every run.
+    async def scenarios_in_order() -> None:
         for repetition in range(1, args.repeat + 1):
             for scenario in scenarios:
                 tools.restart(scenario.id)
@@ -219,18 +218,24 @@ def run_mode(
                         tools.url, args.servers.split(","), {"payments": {"Authorization": f"Bearer {token}"}}
                     )
                 records.append(
-                    asyncio.run(
-                        _run_scenario(
-                            scenario,
-                            mode,
-                            repetition,
-                            backend,
-                            _model_for(args, scenario),
-                            transcript,
-                            args.max_steps,
-                        )
+                    await _run_scenario(
+                        scenario,
+                        mode,
+                        repetition,
+                        backend,
+                        _model_for(args, scenario),
+                        transcript,
+                        args.max_steps,
                     )
                 )
+
+    try:
+        tools.restart(scenarios[0].id)
+        if mode == "warden":
+            warden = Warden(binaries, work, tools.url, token)
+            warden.pin()
+            warden.start()
+        asyncio.run(scenarios_in_order())
     finally:
         tools.stop()
     summary = summarize(mode, records)

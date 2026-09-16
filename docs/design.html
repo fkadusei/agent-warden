@@ -323,8 +323,8 @@ agent ◄──result (tagged)───┘</code></pre>
     <tr><td><strong>1</strong> <span class="pill g">done</span></td><td>Receipt library: JCS, composite signer, chain, commitments, checkpoints, <code>warden-verify</code></td><td>Draft test vectors pass; tamper tests fail verification as expected. <strong>Deferred:</strong> RFC 3161 anchoring, key-epoch certificates, key rotation and revocation, approval receipts</td></tr>
     <tr><td><strong>2</strong> <span class="pill g">done</span></td><td>Gateway: identity, policy, approvals, broker, registry, write-ahead receipts</td><td><code>authz</code>, <code>approval</code>, <code>poison</code>, fail-closed tests pass (<code>warden-gate</code>: 25 attacks refused)</td></tr>
     <tr><td><strong>3</strong> <span class="pill g">done</span></td><td>Output inspector + demo agent + synthetic tools</td><td><code>injection</code>, <code>exfil</code>, <code>deputy</code> scenarios run end to end (scripted compromised agent: 10/10 attacks blocked, 3/3 benign tasks completed, in <code>go test</code> and through <code>warden serve</code> with the Python agent)</td></tr>
-    <tr><td><strong>4</strong></td><td>Benchmark run with/without Warden; checkpoints + anchoring</td><td>Published results table incl. benign completion</td></tr>
-    <tr><td><strong>5</strong></td><td>README, demo video, write-up</td><td>—</td></tr>
+    <tr><td><strong>4</strong> <span class="pill g">done</span></td><td>Benchmark run with/without Warden; checkpoints + anchoring</td><td>Published: 47/62 attack calls succeeded without Warden, 0/62 with it, 20/20 benign both ways (<code>docs/benchmark.html</code>); RFC 3161 timestamps on anchored checkpoints (ADR-0014)</td></tr>
+    <tr><td><strong>5</strong> <span class="pill g">done</span></td><td>README, demo video, write-up</td><td><code>docs/writeup.md</code>, a recorded demo (<code>docs/demo.gif</code>), the <code>warden console</code> (ADR-0015), CI on every push, and <code>docs/not-done.md</code></td></tr>
   </tbody>
 </table></div>
 
