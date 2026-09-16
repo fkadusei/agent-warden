@@ -3,10 +3,12 @@ package chain
 import (
 	"bufio"
 	"cmp"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
+	"time"
 
 	"github.com/fkadusei/agent-warden/internal/checkpoint"
 	"github.com/fkadusei/agent-warden/internal/composite"
@@ -38,6 +40,10 @@ const (
 	ReasonSelfApproval         Reason = "self_approval"
 	ReasonRejectedCallExecuted Reason = "rejected_call_executed"
 	ReasonApprovalExpired      Reason = "approval_expired"
+	// Key rotation (ADR-0016).
+	ReasonWrongKey       Reason = "wrong_key"
+	ReasonBadRotation    Reason = "bad_rotation"
+	ReasonUncertifiedKey Reason = "uncertified_key"
 )
 
 // maxLine bounds a single log line. A receipt line is a few kilobytes.
@@ -61,6 +67,31 @@ func (f *Failure) Error() string {
 // key is unknown or not trusted.
 type KeyResolver func(kid string) (*composite.PublicKey, error)
 
+// Keys is what verification needs from a key set when a chain may rotate its
+// signing key (ADR-0016): the keys it already trusts, and a judgement on the key
+// a rotation introduces. keys.Rotating implements it.
+type Keys interface {
+	// Resolve returns the verification key for a key ID.
+	Resolve(kid string) (*composite.PublicKey, error)
+	// Accept decides whether kid may sign the receipts after a rotation.
+	// certificate is the DER key-epoch certificate the rotation carries, keyDigest
+	// the digest of the incoming composite public key the rotation names, and at
+	// the rotation's timestamp: the certificate is judged at the moment it was
+	// used. On success Resolve must return the accepted key for kid.
+	Accept(kid, keyDigest string, certificate []byte, at time.Time) error
+}
+
+// fixedKeys adapts a plain KeyResolver. It knows the keys it was given and can
+// never learn another, so a log that rotates its key fails closed rather than
+// verifying against a key nothing has vouched for.
+type fixedKeys struct{ resolve KeyResolver }
+
+func (f fixedKeys) Resolve(kid string) (*composite.PublicKey, error) { return f.resolve(kid) }
+
+func (fixedKeys) Accept(kid, _ string, _ []byte, _ time.Time) error {
+	return fmt.Errorf("no certificate roots were given, so the incoming key %q cannot be checked", kid)
+}
+
 // Report summarizes a log that verified.
 type Report struct {
 	ChainID  string
@@ -77,6 +108,17 @@ type Report struct {
 	// Unanchored is the number of receipts after the last checkpoint. These can
 	// still be truncated or rewritten undetectably: the exposure window (W10).
 	Unanchored int64
+	// Rotations lists the key handovers the log records, in order.
+	Rotations []KeyHandover
+}
+
+// KeyHandover is one key rotation a verified log records.
+type KeyHandover struct {
+	Seq    int64  `json:"seq"`
+	TS     string `json:"ts"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type decisionInfo struct {
@@ -98,7 +140,9 @@ func (d *decisionInfo) sameCall(r *receipt.Receipt) bool {
 // It stops at the first failure and returns it as a *Failure.
 //
 // Verify alone cannot detect truncation of the newest receipts or a full
-// rewrite by the key holder; use VerifyWithCheckpoints for that.
+// rewrite by the key holder; use VerifyWithCheckpoints for that. It cannot
+// follow a key rotation either, because it has nothing to judge the incoming
+// key against: use VerifyWithKeys for a chain that rotates.
 func Verify(log io.Reader, chainID string, keys KeyResolver) (*Report, error) {
 	return VerifyWithCheckpoints(log, chainID, keys, nil)
 }
@@ -109,6 +153,16 @@ func Verify(log io.Reader, chainID string, keys KeyResolver) (*Report, error) {
 // prefix of its size: a log shorter than a checkpoint was truncated, and a log
 // whose prefix hashes differently was rewritten, or the anchor shows a fork.
 func VerifyWithCheckpoints(log io.Reader, chainID string, keys KeyResolver, cps []*checkpoint.Checkpoint) (*Report, error) {
+	return VerifyWithKeys(log, chainID, fixedKeys{keys}, cps)
+}
+
+// VerifyWithKeys verifies the log as VerifyWithCheckpoints does and follows key
+// rotations (ADR-0016). Exactly one key signs the chain at any point: the key
+// bound into the genesis parameters until a key_rotation receipt hands over, and
+// the incoming key after it. A rotation is accepted only if the outgoing key
+// signed it and keys accepts the incoming key, so an auditor's trust file holds
+// one key however often the chain rotates.
+func VerifyWithKeys(log io.Reader, chainID string, keys Keys, cps []*checkpoint.Checkpoint) (*Report, error) {
 	sc := bufio.NewScanner(log)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLine)
 
@@ -119,10 +173,13 @@ func VerifyWithCheckpoints(log io.Reader, chainID string, keys KeyResolver, cps 
 	}
 
 	var (
-		lineNo    int
-		seq       int64
-		prev      string
-		lastTS    string
+		lineNo int
+		seq    int64
+		prev   string
+		lastTS string
+		// signer is the key ID allowed to sign at this point in the chain.
+		signer    string
+		rotations []KeyHandover
 		leaves    []merkle.Hash
 		decisions = map[int64]*decisionInfo{}
 	)
@@ -142,7 +199,7 @@ func VerifyWithCheckpoints(log io.Reader, chainID string, keys KeyResolver, cps 
 		if err != nil {
 			return nil, fail(ReasonMalformed, "%v", err)
 		}
-		pub, err := keys(kid)
+		pub, err := keys.Resolve(kid)
 		if err != nil || pub == nil {
 			return nil, fail(ReasonUnknownKey, "kid %q: %v", kid, err)
 		}
@@ -172,6 +229,13 @@ func VerifyWithCheckpoints(log io.Reader, chainID string, keys KeyResolver, cps 
 		}
 		if r.TS < lastTS {
 			return nil, fail(ReasonTimeRegression, "ts %s is before %s", r.TS, lastTS)
+		}
+		// One key signs the chain at a time. A key the chain has retired is as
+		// unwelcome here as a key it never used, whatever the trust file says.
+		if seq == 0 {
+			signer = kid
+		} else if kid != signer {
+			return nil, fail(ReasonWrongKey, "signed by kid %q, but the chain's current key is %q", kid, signer)
 		}
 
 		switch r.Type {
@@ -213,6 +277,28 @@ func VerifyWithCheckpoints(log io.Reader, chainID string, keys KeyResolver, cps 
 				return nil, fail(ReasonApprovalExpired, "result at %s is after the approval expired at %s", r.TS, d.approval.ExpiresTS)
 			}
 			d.resulted = true
+		case receipt.TypeKeyRotation:
+			rot := r.Rotation
+			// The outgoing key must sign its own handover, so taking over a chain
+			// needs the old key as well as the CA.
+			if rot.From != kid {
+				return nil, fail(ReasonBadRotation, "hands over from %q but the receipt is signed by %q", rot.From, kid)
+			}
+			cert, err := base64.RawURLEncoding.Strict().DecodeString(rot.Certificate)
+			if err != nil {
+				return nil, fail(ReasonBadRotation, "certificate: %v", err)
+			}
+			// The certificate is judged as of the rotation, not as of now, so a
+			// log stays verifiable after the epoch it records has expired.
+			at, err := time.Parse(receipt.TimeFormat, r.TS)
+			if err != nil {
+				return nil, fail(ReasonBadRotation, "ts: %v", err)
+			}
+			if err := keys.Accept(rot.To, rot.Key, cert, at); err != nil {
+				return nil, fail(ReasonUncertifiedKey, "incoming key %q: %v", rot.To, err)
+			}
+			signer = rot.To
+			rotations = append(rotations, KeyHandover{Seq: seq, TS: r.TS, From: rot.From, To: rot.To, Reason: rot.Reason})
 		}
 
 		prev = digest.SHA256(line)
@@ -230,7 +316,7 @@ func VerifyWithCheckpoints(log io.Reader, chainID string, keys KeyResolver, cps 
 		return nil, &Failure{Line: 0, Seq: 0, Reason: ReasonEmptyLog, Detail: "no receipts"}
 	}
 
-	rep := &Report{ChainID: chainID, Receipts: lineNo, LastSeq: seq - 1, Head: prev}
+	rep := &Report{ChainID: chainID, Receipts: lineNo, LastSeq: seq - 1, Head: prev, Rotations: rotations}
 
 	sorted := slices.Clone(cps)
 	slices.SortFunc(sorted, func(a, b *checkpoint.Checkpoint) int { return cmp.Compare(a.Size, b.Size) })

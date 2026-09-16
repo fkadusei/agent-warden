@@ -84,6 +84,7 @@ type Receipt struct {
 	Decision *Decision `json:"decision,omitempty"`
 	Result   *Result   `json:"result,omitempty"`
 	Approval *Approval `json:"approval,omitempty"`
+	Rotation *Rotation `json:"rotation,omitempty"`
 }
 
 // Actor records who acted and on whose behalf (threat W4).
@@ -156,27 +157,35 @@ func (r *Receipt) Validate() error {
 		if err := r.validateCallContext(); err != nil {
 			return err
 		}
-		if r.Result != nil || r.Approval != nil {
-			return invalid("decision receipt has a result or approval section")
+		if r.Result != nil || r.Approval != nil || r.Rotation != nil {
+			return invalid("decision receipt has a result, approval, or rotation section")
 		}
 		return r.Decision.validate()
 	case TypeResult:
 		if err := r.validateCallContext(); err != nil {
 			return err
 		}
-		if r.Decision != nil || r.Approval != nil {
-			return invalid("result receipt has a decision or approval section")
+		if r.Decision != nil || r.Approval != nil || r.Rotation != nil {
+			return invalid("result receipt has a decision, approval, or rotation section")
 		}
 		return r.Result.validate(r.Seq)
 	case TypeApproval:
 		if err := r.validateCallContext(); err != nil {
 			return err
 		}
-		if r.Decision != nil || r.Result != nil {
-			return invalid("approval receipt has a decision or result section")
+		if r.Decision != nil || r.Result != nil || r.Rotation != nil {
+			return invalid("approval receipt has a decision, result, or rotation section")
 		}
 		return r.Approval.validate(r.Seq, r.TS)
-	case TypeKeyRotation, TypeCheckpoint:
+	case TypeKeyRotation:
+		if r.TaskID != "" || r.Actor != nil || r.Call != nil {
+			return invalid("key rotation receipt has a task, actor, or call section")
+		}
+		if r.Decision != nil || r.Result != nil || r.Approval != nil {
+			return invalid("key rotation receipt has a decision, result, or approval section")
+		}
+		return r.Rotation.validate()
+	case TypeCheckpoint:
 		return fmt.Errorf("%w: %s", ErrUnsupportedType, r.Type)
 	default:
 		return invalid("unknown type %q", r.Type)
@@ -273,6 +282,60 @@ func (a *Approval) validate(seq int64, ts string) error {
 	// TimeFormat has a fixed width, so string order is time order.
 	if a.ExpiresTS <= ts {
 		return invalid("approval.expires_ts must be after the receipt's ts")
+	}
+	return nil
+}
+
+// Rotation hands the chain from one signing key to the next (ADR-0016). The receipt
+// carrying it is the last one the outgoing key signs; every later receipt is signed by
+// the incoming key.
+//
+// It is signed by the outgoing key, and the incoming key is independently certified by
+// the root CA, so forging a rotation needs both the old key and the CA. The certificate
+// travels in the receipt so a verifier needs only the log and the root.
+type Rotation struct {
+	// From is the key ID that signed this receipt and everything before it.
+	From string `json:"from"`
+	// To is the key ID that signs everything after it.
+	To string `json:"to"`
+	// Key is the digest of the incoming composite public key, as the genesis
+	// parameters record a chain's first key.
+	Key string `json:"key"`
+	// Certificate is the incoming key's key-epoch certificate (ADR-0010), DER, in
+	// base64url without padding, as every other binary field in a receipt.
+	Certificate string `json:"certificate"`
+	// Reason is why the key was retired: free text for the log's readers.
+	Reason string `json:"reason,omitempty"`
+}
+
+const maxCertificate = 64 << 10
+
+func (rot *Rotation) validate() error {
+	if rot == nil {
+		return invalid("missing rotation")
+	}
+	if err := validID("rotation.from", rot.From); err != nil {
+		return err
+	}
+	if err := validID("rotation.to", rot.To); err != nil {
+		return err
+	}
+	if rot.From == rot.To {
+		return invalid("rotation.to must differ from rotation.from")
+	}
+	if !digest.Valid(rot.Key) {
+		return invalid("rotation.key is not a sha256 digest")
+	}
+	if rot.Certificate == "" || len(rot.Certificate) > maxCertificate {
+		return invalid("rotation.certificate must be 1-%d bytes", maxCertificate)
+	}
+	if _, err := b64.DecodeString(rot.Certificate); err != nil {
+		return invalid("rotation.certificate is not base64 DER")
+	}
+	if rot.Reason != "" {
+		if err := validID("rotation.reason", rot.Reason); err != nil {
+			return err
+		}
 	}
 	return nil
 }

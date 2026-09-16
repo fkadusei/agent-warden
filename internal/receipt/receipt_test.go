@@ -137,8 +137,9 @@ func TestValidateRejects(t *testing.T) {
 		})
 	}
 
+	// key_rotation became a specified type in ADR-0016; checkpoint is still reserved.
 	t.Run("unspecified types are refused, not accepted", func(t *testing.T) {
-		for _, typ := range []Type{TypeKeyRotation, TypeCheckpoint} {
+		for _, typ := range []Type{TypeCheckpoint} {
 			r := decision(7)
 			r.Type = typ
 			if err := r.Validate(); !errors.Is(err, ErrUnsupportedType) {
