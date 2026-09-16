@@ -1,0 +1,65 @@
+# The trust path: build, vet, the full test suite, and both attack gates.
+name: go
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed for:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Tests
+        run: go test ./...
+
+      # The gates are the guarantee: a scripted, fully compromised agent must get
+      # nothing through. They also run under `go test`, but a non-zero exit here names
+      # the failing defence directly in the log.
+      - name: Attack gates
+        run: go run ./cmd/warden-gate
+
+      - name: Race detector on the enforcement path
+        run: go test -race ./internal/gateway ./internal/gate ./internal/mcpgw ./internal/store
+
+      # Receipts are JWS: the chain ID lives inside the base64url payload, so the
+      # command is taken from the demo's own output rather than reconstructed.
+      - name: Demo produces a verifiable log
+        run: |
+          go run ./cmd/warden-demo | tee demo.out
+          verify=$(grep -m1 -- '--log demo-output/receipts.jsonl' demo.out)
+          echo "running: $verify"
+          eval "$verify"
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...

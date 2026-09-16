@@ -1,0 +1,41 @@
+# The Python demo agent and benchmark harness: lint, types, tests.
+name: agent
+
+on:
+  push:
+    branches: [main]
+    paths: ["agent/**", "scenarios/**", ".github/workflows/agent.yml"]
+  pull_request:
+    paths: ["agent/**", "scenarios/**", ".github/workflows/agent.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: agent
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Format and lint
+        run: |
+          uv run ruff format --check .
+          uv run ruff check .
+
+      - name: Types
+        run: uv run mypy src tests
+
+      # The tests read the real scenario corpus, so a malformed scenario fails here too.
+      - name: Tests
+        run: uv run pytest -q
