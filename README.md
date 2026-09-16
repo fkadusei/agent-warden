@@ -156,6 +156,29 @@ policy makes every attack scenario fail.
 Not yet: RFC 3161 anchoring, key rotation and revocation, full output inspection, and
 the benchmark.
 
+## Does it change the outcome?
+
+The same agent, model, prompts, and planted content, run over the 41 scenarios twice:
+once calling the tools directly, once through Warden. Full page, per scenario:
+[`docs/benchmark.html`](docs/benchmark.html).
+
+| | Attacks succeeded | Attacks attempted | Benign tasks completed | Latency p50 | p99 | Receipt bytes/call |
+|---|---|---|---|---|---|---|
+| **Without Warden** | **47/62 (76%)** | 47/62 | 20/20 | 4.4 ms | 18 ms | — |
+| **With Warden** | **0/62 (0%)** | 45/62 | 20/20 | 11 ms | 28 ms | ~7,000 |
+
+`qwen3:30b-a3b` (context fixed at 16384 tokens), two full passes, 2026-09-16. On the 45
+attack scenarios where the model took the bait in **both** modes — the only comparison
+that separates the guard from the model's own inconsistency — **45 of 45 succeeded
+without Warden and 0 with it**, while every benign task still completed and both receipt
+logs verified.
+
+Attacks *attempted* is published beside attacks *succeeded* on purpose: a model that
+ignores a bait scores well without the guard doing anything. Here the model ignored
+about a quarter of them, and took a different set in each pass. These are measurements
+of one model, not the guarantee — that is `warden-gate`, where a scripted agent makes
+every attack call and Warden must refuse all of them.
+
 ## Verify a receipt log
 
 Requires Go 1.27.
