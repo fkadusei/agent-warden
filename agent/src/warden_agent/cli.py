@@ -11,8 +11,9 @@ from pathlib import Path
 
 from . import scenarios as sc
 from .direct import connect_direct
+from .factory import make_model
 from .loop import SYSTEM_PROMPT, RunResult, ToolBackend, Transcript, run
-from .models import AnthropicModel, Model, OpenAICompatibleModel, ScriptModel
+from .models import Model
 from .warden import connect
 
 
@@ -78,24 +79,19 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _model(args: argparse.Namespace, scenario: sc.Scenario | None) -> Model:
-    if args.adapter == "script":
-        if scenario is None:
-            raise SystemExit("--adapter script needs --scenario")
-        return ScriptModel([(st.call, st.args) for st in scenario.steps])
-    if not args.model:
-        raise SystemExit(f"--adapter {args.adapter} needs --model")
-    if args.adapter == "anthropic":
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise SystemExit("set ANTHROPIC_API_KEY in the environment")
-        return AnthropicModel(args.model)
-    key = os.environ.get(args.api_key_env)
-    if not key:
-        if not args.base_url:
-            raise SystemExit(
-                f"set {args.api_key_env} in the environment, or give --base-url for a local endpoint"
-            )
-        key = "unused"  # local servers such as Ollama ignore the key
-    return OpenAICompatibleModel(args.model, base_url=args.base_url, api_key=key)
+    if args.adapter == "script" and scenario is None:
+        raise SystemExit("--adapter script needs --scenario")
+    script = [(st.call, st.args) for st in scenario.steps] if scenario else None
+    try:
+        return make_model(
+            args.adapter,
+            model=args.model,
+            base_url=args.base_url,
+            api_key_env=args.api_key_env,
+            script=script,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def _print_run(result: RunResult) -> None:

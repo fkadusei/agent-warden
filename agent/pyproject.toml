@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 warden-agent = "warden_agent.cli:main"
+warden-bench = "warden_agent.bench:main"
 
 [dependency-groups]
 dev = [
@@ -35,6 +36,12 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "S", "RUF"]
 ignore = ["S101"]  # assert is how pytest checks
+
+[tool.ruff.lint.per-file-ignores]
+# The benchmark runs Warden's own built binaries, plus go and git, with fixed argument
+# lists and no shell; the paths come from the harness, never from scenario data.
+"src/warden_agent/bench.py" = ["S603", "S607"]
+"src/warden_agent/deployment.py" = ["S603", "S607"]
 
 [tool.mypy]
 strict = true

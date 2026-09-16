@@ -40,6 +40,28 @@ a file. API keys are read only from environment variables, never from flags.
 Model results vary by model and run; they are reported per model and version and are
 never a pass/fail gate. The deterministic gate is `go run ./cmd/warden-gate`.
 
+## Benchmark: with and without Warden
+
+`warden-bench` runs the whole corpus in both modes and reports the numbers:
+
+```sh
+uv run --project agent warden-bench --adapter script                       # both modes, one pass
+uv run --project agent warden-bench --adapter anthropic --model MODEL_ID --repeat 3
+uv run --project agent warden-bench --adapter openai-compatible \
+  --base-url http://127.0.0.1:11434/v1 --model llama3.2:3b --modes warden
+```
+
+It builds the Go binaries, starts the tool servers with each scenario's planted content,
+runs a real `warden serve` for the Warden mode (a fresh task credential per scenario),
+then stops it, exports the receipt log, and verifies it. Each run writes `results.json`,
+`summary.md`, and a transcript per scenario to `agent-runs/bench-<timestamp>/`.
+
+Reported per mode: attack success rate, benign completion rate, how many attack calls
+the model attempted at all, call latency (p50/p99), and receipt bytes per call. Model
+numbers are measurements, not a gate: a model that rarely calls tools scores a low
+attack success rate without Warden doing anything, so the attempted count is printed
+beside it. `--repeat` runs each scenario several times, since model runs vary.
+
 ## Run the whole corpus
 
 `scripts/agent-corpus.sh` starts a temporary Warden (synthetic keys, removed on exit),
