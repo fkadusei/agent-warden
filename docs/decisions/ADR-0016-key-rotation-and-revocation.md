@@ -58,6 +58,31 @@ Revocations are published **to the anchor**, beside the checkpoints, not into th
 log: a compromised Warden must not be able to quietly drop the notice that its key is
 compromised.
 
+They go in their own file next to the anchor, not as extra lines inside it. Every line of
+an anchor is a checkpoint — `checkpoint.ReadVerified` parses it as one — so mixing record
+types would break existing anchors and every reader of them. The property that matters is
+where the file lives, not which file it is.
+
+A revocation names the checkpoint's **size and head**, not its size alone, so it is pinned
+to one history and cannot be re-aimed at a fork of the same length.
+
+### The root signs revocations
+
+A revocation is signed by the **root CA**. It is the one authority a stolen
+receipt-signing key cannot impersonate, and it already decides which keys are legitimate
+for a chain by issuing their key-epoch certificates.
+
+This makes revoking a key a break-glass action that needs the offline root. That is a real
+cost, and the right one: revocation is exactly the statement an attacker most wants to
+forge, and the moment it is needed is already an incident.
+
+The root signs with plain ML-DSA-65, not the composite suite receipts use, so a revocation
+carries **its own envelope** rather than the receipt one. Receipt verification hardcodes
+its algorithm on purpose — that check is what stops algorithm-confusion attacks — and
+loosening it to admit a second algorithm would weaken receipts to serve a peripheral
+record. The revocation envelope keeps the same shape, binds an ML-DSA context string, and
+carries its own domain.
+
 ### What a verifier reports
 
 `warden-verify` takes the revocations alongside the anchor. A log whose tail was signed

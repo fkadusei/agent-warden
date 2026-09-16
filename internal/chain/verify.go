@@ -44,6 +44,7 @@ const (
 	ReasonWrongKey       Reason = "wrong_key"
 	ReasonBadRotation    Reason = "bad_rotation"
 	ReasonUncertifiedKey Reason = "uncertified_key"
+	ReasonRevokedKey     Reason = "revoked_key"
 )
 
 // maxLine bounds a single log line. A receipt line is a few kilobytes.
@@ -92,6 +93,11 @@ func (fixedKeys) Accept(kid, _ string, _ []byte, _ time.Time) error {
 	return fmt.Errorf("no certificate roots were given, so the incoming key %q cannot be checked", kid)
 }
 
+// StaticKeys adapts a plain KeyResolver into Keys, for a caller that has a trust
+// file and no certificate roots. A log that rotates its key fails closed under
+// it; use keys.Rotating to follow rotations.
+func StaticKeys(keys KeyResolver) Keys { return fixedKeys{keys} }
+
 // Report summarizes a log that verified.
 type Report struct {
 	ChainID  string
@@ -119,6 +125,21 @@ type KeyHandover struct {
 	From   string `json:"from"`
 	To     string `json:"to"`
 	Reason string `json:"reason,omitempty"`
+}
+
+// Revoked withdraws trust in a key from a point in the chain onward (ADR-0016).
+// Receipts before EffectiveSize keep verifying; the key signing at or after it
+// is a verification failure.
+//
+// It is the caller's job to turn published revocation records into these, and to
+// check each one against the anchored checkpoint it names first. Verification
+// takes the judgement, not the evidence for it.
+type Revoked struct {
+	// Kid is the key that is no longer trusted.
+	Kid string
+	// EffectiveSize is the size of the last checkpoint believed good, so it is
+	// the sequence number from which this key's receipts are refused.
+	EffectiveSize int64
 }
 
 type decisionInfo struct {
@@ -163,6 +184,23 @@ func VerifyWithCheckpoints(log io.Reader, chainID string, keys KeyResolver, cps 
 // signed it and keys accepts the incoming key, so an auditor's trust file holds
 // one key however often the chain rotates.
 func VerifyWithKeys(log io.Reader, chainID string, keys Keys, cps []*checkpoint.Checkpoint) (*Report, error) {
+	return VerifyAll(log, chainID, Options{Keys: keys, Checkpoints: cps})
+}
+
+// Options are everything verification can be given beyond the log itself.
+type Options struct {
+	// Keys resolves signing keys and judges the keys rotations introduce.
+	Keys Keys
+	// Checkpoints are anchored, already signature-verified checkpoints.
+	Checkpoints []*checkpoint.Checkpoint
+	// Revocations withdraw trust in a key from a checkpoint onward.
+	Revocations []Revoked
+}
+
+// VerifyAll is verification with everything it can be given: rotations to
+// follow, checkpoints to check the log against, and revocations to enforce.
+func VerifyAll(log io.Reader, chainID string, o Options) (*Report, error) {
+	keys, cps := o.Keys, o.Checkpoints
 	sc := bufio.NewScanner(log)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLine)
 
@@ -236,6 +274,14 @@ func VerifyWithKeys(log io.Reader, chainID string, keys Keys, cps []*checkpoint.
 			signer = kid
 		} else if kid != signer {
 			return nil, fail(ReasonWrongKey, "signed by kid %q, but the chain's current key is %q", kid, signer)
+		}
+		// A revoked key keeps everything it signed up to the checkpoint believed
+		// good, and nothing after it.
+		for _, rev := range o.Revocations {
+			if rev.Kid == kid && seq >= rev.EffectiveSize {
+				return nil, fail(ReasonRevokedKey,
+					"kid %q was revoked from seq %d onward", kid, rev.EffectiveSize)
+			}
 		}
 
 		switch r.Type {
