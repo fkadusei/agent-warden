@@ -27,6 +27,7 @@ const (
 	Injection Category = "injection" // W1: instructions planted in tool output
 	Exfil     Category = "exfil"     // W3: data or credentials leaving
 	Deputy    Category = "deputy"    // W4: another principal's content driving this task
+	Authz     Category = "authz"     // W2: calls outside the principal's entitlements
 	Benign    Category = "benign"    // legitimate work that must succeed
 )
 
@@ -60,6 +61,11 @@ type Step struct {
 	Expect Expect `json:"expect"`
 	// Rule, if set, must be the policy rule behind the outcome.
 	Rule string `json:"rule,omitempty"`
+	// Match names the arguments that identify this call when reporting on a real
+	// model's run, which may word the rest differently (an email body, say). Absent
+	// means every argument; an empty list means any call to the tool. The scripted
+	// gate always sends Args exactly.
+	Match *[]string `json:"match,omitempty"`
 }
 
 // Scenario is one file of the corpus.
@@ -153,7 +159,7 @@ func (s *Scenario) validate() error {
 		if s.Threat != "" {
 			return errors.New("benign scenarios have no threat")
 		}
-	case Injection, Exfil, Deputy:
+	case Injection, Exfil, Deputy, Authz:
 		if !threatPattern.MatchString(s.Threat) {
 			return fmt.Errorf("threat %q must be W1-W14", s.Threat)
 		}
@@ -187,6 +193,15 @@ func (s *Scenario) validate() error {
 		}
 		if st.Rule != "" && st.Expect == OK {
 			return fmt.Errorf("steps[%d] names a rule but expects ok", i)
+		}
+		if st.Match != nil {
+			seen := map[string]bool{}
+			for _, name := range *st.Match {
+				if _, ok := st.Args[name]; !ok || seen[name] {
+					return fmt.Errorf("steps[%d].match %q must name a distinct argument of the step", i, name)
+				}
+				seen[name] = true
+			}
 		}
 	}
 	if s.Category == Benign {

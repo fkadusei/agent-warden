@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "benign-inbox-summary",
+  "category": "benign",
+  "title": "Summarizing the support inbox",
+  "principal": "alice@tenant-a",
+  "task": "Summarize the support inbox.",
+  "steps": [
+    {
+      "call": "mail.inbox",
+      "expect": "ok"
+    }
+  ]
+}

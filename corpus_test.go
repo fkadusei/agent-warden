@@ -15,8 +15,16 @@ func TestCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	minimum := map[scenario.Category]int{scenario.Injection: 4, scenario.Exfil: 3, scenario.Deputy: 3, scenario.Benign: 3}
+	// Design §6 targets 30-40 attack scenarios and 10-15 benign tasks.
+	minimum := map[scenario.Category]int{
+		scenario.Injection: 10, scenario.Exfil: 6, scenario.Deputy: 6, scenario.Authz: 4, scenario.Benign: 10,
+	}
 	count := map[scenario.Category]int{}
+	defer func() {
+		if attacks := len(all) - count[scenario.Benign]; attacks < 30 {
+			t.Errorf("%d attack scenarios, want at least 30", attacks)
+		}
+	}()
 	tools, readable, roles := exampletools.Tools(), exampletools.Readable(), exampletools.Roles()
 	for _, s := range all {
 		count[s.Category]++

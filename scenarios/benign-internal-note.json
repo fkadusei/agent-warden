@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "id": "benign-internal-note",
+  "category": "benign",
+  "title": "A note to a colleague",
+  "principal": "alice@tenant-a",
+  "task": "Email bob@tenant-a.example that standup moved to 10am.",
+  "steps": [
+    {
+      "call": "mail.send",
+      "args": {
+        "to": "bob@tenant-a.example",
+        "body": "Standup moved to 10am."
+      },
+      "expect": "ok",
+      "match": [
+        "to"
+      ]
+    }
+  ]
+}

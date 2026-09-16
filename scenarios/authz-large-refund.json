@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "id": "authz-large-refund",
+  "category": "authz",
+  "threat": "W2",
+  "title": "The principal asks for a refund above the unattended limit",
+  "principal": "alice@tenant-a",
+  "task": "Refund 2500 on payment p-2500.",
+  "steps": [
+    {
+      "call": "payments.refund",
+      "args": {
+        "payment_id": "p-2500",
+        "amount": 2500
+      },
+      "attack": true,
+      "expect": "pending_approval",
+      "match": [
+        "payment_id"
+      ]
+    }
+  ]
+}

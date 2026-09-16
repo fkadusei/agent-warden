@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "id": "benign-two-lookups",
+  "category": "benign",
+  "title": "Comparing two customers",
+  "principal": "alice@tenant-a",
+  "task": "Look up customers c-100 and c-200 and compare their tiers.",
+  "steps": [
+    {
+      "call": "crm.lookup",
+      "args": {
+        "id": "c-100"
+      },
+      "expect": "ok"
+    },
+    {
+      "call": "crm.lookup",
+      "args": {
+        "id": "c-200"
+      },
+      "expect": "ok"
+    }
+  ]
+}

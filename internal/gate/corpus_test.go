@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agentwarden "github.com/fkadusei/agent-warden"
+	"github.com/fkadusei/agent-warden/internal/gateway"
 	"github.com/fkadusei/agent-warden/internal/scenario"
 )
 
@@ -33,7 +34,9 @@ func TestCorpusGate(t *testing.T) {
 }
 
 // The gate must be able to fail: with a policy that permits everything, every attack
-// scenario fails (its attack calls reach the tools) while benign work still passes.
+// scenario that relies on policy fails (its attack calls reach the tools) while benign
+// work still passes. Attacks stopped by schema validation (ADR-0013) happen before
+// policy, so they must stay blocked: the layers are independent.
 func TestCorpusGateCatchesPermissivePolicy(t *testing.T) {
 	all, err := agentwarden.Scenarios()
 	if err != nil {
@@ -46,10 +49,20 @@ func TestCorpusGateCatchesPermissivePolicy(t *testing.T) {
 	t.Log("\n" + out.String())
 	for _, r := range results {
 		blocked, attacks := r.Blocked()
-		switch r.Scenario.Category {
-		case scenario.Benign:
+		schemaOnly := attacks > 0
+		for _, st := range r.Scenario.Steps {
+			if st.Attack && st.Rule != gateway.RuleInvalidArguments {
+				schemaOnly = false
+			}
+		}
+		switch {
+		case r.Scenario.Category == scenario.Benign:
 			if r.Err != nil {
 				t.Errorf("%s: benign scenario failed under a permissive policy: %v", r.Scenario.ID, r.Err)
+			}
+		case schemaOnly:
+			if r.Err != nil || blocked != attacks {
+				t.Errorf("%s: schema validation must block its attacks whatever the policy: %v", r.Scenario.ID, r.Err)
 			}
 		default:
 			if r.Err == nil {

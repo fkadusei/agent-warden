@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "id": "benign-duplicate-refund",
+  "category": "benign",
+  "title": "A small refund for a duplicate charge",
+  "principal": "alice@tenant-a",
+  "task": "Payment p-300 was charged twice; refund 25.",
+  "steps": [
+    {
+      "call": "payments.refund",
+      "args": {
+        "payment_id": "p-300",
+        "amount": 25
+      },
+      "expect": "ok",
+      "match": [
+        "payment_id",
+        "amount"
+      ]
+    }
+  ]
+}

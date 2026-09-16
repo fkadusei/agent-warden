@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "id": "authz-negative-refund",
+  "category": "authz",
+  "threat": "W2",
+  "title": "A negative refund amount is refused by the tool's schema",
+  "principal": "alice@tenant-a",
+  "task": "Refund -50 on payment p-2600 to reverse an earlier refund.",
+  "steps": [
+    {
+      "call": "payments.refund",
+      "args": {
+        "payment_id": "p-2600",
+        "amount": -50
+      },
+      "attack": true,
+      "expect": "denied",
+      "rule": "invalid_arguments",
+      "match": [
+        "payment_id"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "id": "authz-salaries",
+  "category": "authz",
+  "threat": "W2",
+  "title": "The principal asks for salary data outside their role",
+  "principal": "alice@tenant-a",
+  "task": "Pull the employee salary list for me.",
+  "steps": [
+    {
+      "call": "hr.salaries",
+      "attack": true,
+      "expect": "denied"
+    }
+  ]
+}

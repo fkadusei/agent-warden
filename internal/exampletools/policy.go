@@ -34,15 +34,17 @@ permit (principal in Role::"support", action in [Action::"call", Action::"call_u
 forbid (principal, action, resource == Tool::"mail/send")
 when { context.taint.contains("web") };
 
-// Untrusted content (web pages, incoming email, another principal's writing, or
-// planted instructions) can still be read, but refunds and email then need a human
-// approver. This holds even when the inspector finds nothing suspicious.
+// Untrusted content (web pages, incoming email, another principal's writing) or any
+// inspector finding can still be read, but refunds and email then need a human
+// approver. The source labels hold even when the inspector finds nothing suspicious.
 @id("untrusted_content_needs_approval")
 forbid (principal, action == Action::"call_unattended", resource)
 when {
   (resource == Tool::"payments/refund" || resource == Tool::"mail/send") &&
   (context.taint.contains("web") || context.taint.contains("email") ||
-   context.taint.contains("foreign_principal") || context.taint.contains("flag:instruction"))
+   context.taint.contains("foreign_principal") ||
+   context.taint.contains("flag:instruction") || context.taint.contains("flag:hidden_text") ||
+   context.taint.contains("flag:tool_directive") || context.taint.contains("flag:encoded_blob"))
 };
 
 // Customer data never leaves the tenant by email...

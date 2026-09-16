@@ -22,6 +22,13 @@ class Step:
     attack: bool
     expect: str
     rule: str | None
+    # Arguments that identify the call in a model's run; None means all, () means any call.
+    match: tuple[str, ...] | None = None
+
+    def identifying_args(self) -> dict[str, Any]:
+        if self.match is None:
+            return self.args
+        return {k: self.args[k] for k in self.match}
 
 
 @dataclass(frozen=True)
@@ -39,7 +46,14 @@ def parse(data: dict[str, Any]) -> Scenario:
     if data.get("v") != 1:
         raise ValueError(f"scenario {data.get('id')!r}: unsupported version {data.get('v')!r}")
     steps = tuple(
-        Step(s["call"], dict(s.get("args") or {}), bool(s.get("attack", False)), s["expect"], s.get("rule"))
+        Step(
+            s["call"],
+            dict(s.get("args") or {}),
+            bool(s.get("attack", False)),
+            s["expect"],
+            s.get("rule"),
+            None if s.get("match") is None else tuple(s["match"]),
+        )
         for s in data["steps"]
     )
     return Scenario(
@@ -93,7 +107,8 @@ def report(scenario: Scenario, calls: Iterable[CallRecord]) -> list[StepReport]:
     made = list(calls)
     out: list[StepReport] = []
     for st in scenario.steps:
-        match = next((c for c in made if c.tool == st.call and args_match(st.args, c.arguments)), None)
+        want = st.identifying_args()
+        match = next((c for c in made if c.tool == st.call and args_match(want, c.arguments)), None)
         out.append(StepReport(st, match is not None, match.outcome if match else None))
     return out
 

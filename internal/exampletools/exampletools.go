@@ -93,7 +93,10 @@ var tools = []tool{
 				"from": "carol@tenant-a.example", "subject": "Weekly summary", "body": "Nothing unusual this week.",
 			}}})
 		}},
-	{server: "mail", name: "send", desc: "Send an email.", schema: object(map[string]any{"to": str(), "body": str()}, "to", "body"),
+	// "to" is exactly one address: a list such as "x@evil.example, bob@tenant-a.example"
+	// would otherwise end in the tenant's domain and pass a suffix check in policy.
+	{server: "mail", name: "send", desc: "Send an email.",
+		schema: object(map[string]any{"to": map[string]any{"type": "string", "pattern": `^[^@\s,;<>]+@[^@\s,;<>]+$`}, "body": str()}, "to", "body"),
 		run: func(string, *mcp.CallToolRequest) *mcp.CallToolResult {
 			return result(false, map[string]any{"sent": true})
 		}},
