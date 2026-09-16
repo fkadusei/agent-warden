@@ -15,6 +15,13 @@ The agent is untrusted by design: it proposes actions, and Warden decides them.
 > passes, and the with/without-Warden benchmark is published below. Phase 5 (write-up,
 > demo, CI) is in progress. See [`docs/design.md`](docs/design.md#7-build-phases).
 
+![A call decided, the gate, and the evidence](docs/demo.gif)
+
+*One run, three acts: a refund held for approval and the requester refused when approving
+their own call; the gate blocking 31 of 31 attacks while every benign task completes; and
+`warden-verify` catching one edited character and a truncated log. Script and commands:
+[`docs/demo.md`](docs/demo.md).*
+
 ## Does it change the outcome?
 
 The same agent, model, prompts, and planted content, run over 41 scenarios twice: once

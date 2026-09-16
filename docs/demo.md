@@ -4,9 +4,24 @@ A script for a five-minute walkthrough. Every command below was run to produce t
 output shown, so the recording can be checked against it. Three acts, in this order:
 **a call being decided**, **the gate**, and **the evidence**.
 
-Record it however suits: a terminal recording (asciinema, `agg`, or `vhs` produce a
-committable asset) or a screen capture. Nothing here needs editing tricks — the point is
-that the output is real.
+A recording of exactly this is committed: [`demo.gif`](demo.gif) (what the README shows)
+and [`demo.cast`](demo.cast), the asciicast it came from. Replay the cast in a terminal
+with `asciinema play docs/demo.cast` — it is text, so it diffs and reviews like code.
+
+To re-record after a change:
+
+```sh
+PAUSE=1 asciinema rec --overwrite --window-size 136x34 --idle-time-limit 2 --return \
+  --title "Agent Warden — a call decided, the gate, the evidence" \
+  --command scripts/demo-record.sh docs/demo.cast
+agg --theme github-dark --font-size 15 --speed 1.4 --idle-time-limit 1.5 \
+  docs/demo.cast docs/demo.gif
+```
+
+[`scripts/demo-record.sh`](../scripts/demo-record.sh) drives the three acts. It builds
+the binaries first, outside the recording, so no act opens with a compile, and it prints
+the command a viewer would type (`go run ./cmd/...`) while running the prebuilt one.
+Nothing here needs editing tricks — the point is that the output is real.
 
 Set up once, in the repository root:
 
