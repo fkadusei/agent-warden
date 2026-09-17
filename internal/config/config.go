@@ -60,6 +60,10 @@ type Config struct {
 	ReceiptCert string `json:"receipt_cert,omitempty"`
 	Store       string `json:"store"`
 	Anchor      string `json:"anchor"`
+	// Revocations is where withdrawn keys are published, beside the anchor
+	// (ADR-0016). It is defaulted when absent, so a configuration written before
+	// rotation existed keeps working.
+	Revocations string `json:"revocations,omitempty"`
 
 	CheckpointEvery    int64    `json:"checkpoint_every"`
 	CheckpointInterval Duration `json:"checkpoint_interval"`
@@ -111,6 +115,9 @@ func Load(path string) (*Config, error) {
 	}
 	if c.CheckpointInterval.Duration == 0 {
 		c.CheckpointInterval.Duration = time.Minute
+	}
+	if c.Revocations == "" {
+		c.Revocations = "data/revocations.jsonl"
 	}
 	if c.TSA != nil {
 		if c.TSA.Timeout.Duration == 0 {

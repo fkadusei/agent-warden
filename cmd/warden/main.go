@@ -4,6 +4,8 @@
 //	warden pin           list upstream tools and (with --write) pin them after review
 //	warden add-approver  create an approver key and trust it
 //	warden issue-task    issue a short-lived task credential for an agent
+//	warden rotate-key    hand the chain over to a new receipt-signing key
+//	warden revoke-key    withdraw trust in a key from the last good checkpoint
 //	warden serve         run the agent MCP endpoint and the approver API
 //	warden call          act as an agent: list or call tools through Warden
 //	warden approve       list pending calls and approve or reject one
@@ -35,6 +37,8 @@ commands:
   pin           list upstream tools; --write pins them after you review the list
   add-approver  create an approver key and add it to the trusted approvers
   issue-task    issue a short-lived task credential for an agent
+  rotate-key    hand the chain over to a new receipt-signing key (--kid)
+  revoke-key    withdraw trust in a key from the last good checkpoint (--kid)
   serve         run the agent MCP endpoint and the approver API
   call          act as an agent: --list tools or --tool NAME --args JSON
   approve       list pending calls, or --decision N to approve (or --reject) one
@@ -54,6 +58,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		"pin":          cmdPin,
 		"add-approver": cmdAddApprover,
 		"issue-task":   cmdIssueTask,
+		"rotate-key":   cmdRotateKey,
+		"revoke-key":   cmdRevokeKey,
 		"serve":        cmdServe,
 		"call":         cmdCall,
 		"approve":      cmdApprove,

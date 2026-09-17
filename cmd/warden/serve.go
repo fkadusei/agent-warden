@@ -262,9 +262,20 @@ func newCheckpointer(st *store.Store, key *composite.PrivateKey, cfg *config.Con
 	if err != nil {
 		return nil, err
 	}
+	// A rotated chain's older checkpoints were signed by the keys it used then,
+	// so the anchor has to be read with every key the chain has used, not only
+	// the current one (ADR-0016). A missing trust file is not fatal: the current
+	// key alone is what an unrotated chain needs.
+	trusted, err := trustedKeys(cfg)
+	if err != nil {
+		trusted = nil
+	}
 	resolve := func(kid string) (*composite.PublicKey, error) {
 		if kid == c.kid {
 			return key.Public(), nil
+		}
+		if pub, ok := trusted[kid]; ok {
+			return pub, nil
 		}
 		return nil, fmt.Errorf("unknown key %q", kid)
 	}
