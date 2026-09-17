@@ -3,6 +3,7 @@ package gate
 import (
 	"bytes"
 	"context"
+	"crypto/mldsa"
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
@@ -16,8 +17,11 @@ import (
 
 	"github.com/fkadusei/agent-warden/internal/approval"
 	"github.com/fkadusei/agent-warden/internal/chain"
+	"github.com/fkadusei/agent-warden/internal/checkpoint"
 	"github.com/fkadusei/agent-warden/internal/composite"
+	"github.com/fkadusei/agent-warden/internal/identity"
 	"github.com/fkadusei/agent-warden/internal/receipt"
+	"github.com/fkadusei/agent-warden/internal/revocation"
 )
 
 // Scenario is one attack. Run returns nil when Warden's defense held.
@@ -414,6 +418,172 @@ var Scenarios = []Scenario{
 		}
 		if f.Seq != 0 {
 			return breach("edit in receipt 0 reported at receipt %d", f.Seq)
+		}
+		return nil
+	}},
+
+	// --- Key rotation and revocation (W11, W10) -----------------------------
+	{"K1", "keys", "W11", "Chain that rotates its signing key still verifies from the key it began with", func(e *Env) error {
+		if _, _, err := e.call(e.Alice, "crm.lookup", `{"id":"c-100"}`); err != nil {
+			return err
+		}
+		if err := e.rotate("gate-e2"); err != nil {
+			return err
+		}
+		// The gateway keeps working, and what it writes now is signed by the new key.
+		if _, _, err := e.call(e.Alice, "crm.lookup", `{"id":"c-101"}`); err != nil {
+			return err
+		}
+		rep, err := e.verifyFromGenesis(nil)
+		if err != nil {
+			return breach("a rotated log does not verify: %v", err)
+		}
+		if len(rep.Rotations) != 1 || rep.Rotations[0].To != "gate-e2" {
+			return breach("handovers recorded as %+v", rep.Rotations)
+		}
+		// An auditor started from one key and finished holding two.
+		if n := rep.Receipts; n < 4 {
+			return breach("only %d receipts across the rotation", n)
+		}
+		return nil
+	}},
+	{"K2", "keys", "W11", "Stolen signing key alone cannot introduce a new key", func(e *Env) error {
+		if _, _, err := e.call(e.Alice, "crm.lookup", `{"id":"c-100"}`); err != nil {
+			return err
+		}
+		// The attacker holds the signing key and mints their own key, but has no
+		// certificate from the root for it. Forging the epoch with another CA is
+		// the closest they can get.
+		attacker, err := composite.MLDSA65Ed25519.GenerateKey()
+		if err != nil {
+			return err
+		}
+		rogueRoot, err := mldsa.GenerateKey(mldsa.MLDSA65())
+		if err != nil {
+			return err
+		}
+		rogueCA, err := identity.NewCA("Not Warden's Root", rogueRoot, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+		if err != nil {
+			return err
+		}
+		epoch, err := rogueCA.IssueKeyEpoch("gate-e2", attacker.Public(), time.Now().Add(-time.Minute), time.Now().Add(time.Hour))
+		if err != nil {
+			return err
+		}
+		lines, err := e.appendForged(e.receiptKey, kid, rotationReceipt(kid, "gate-e2", attacker, epoch))
+		if err != nil {
+			return err
+		}
+		return e.mustFail(lines, chain.ReasonUncertifiedKey)
+	}},
+	{"K3", "keys", "W11", "Retired key cannot sign once it has handed over", func(e *Env) error {
+		if _, _, err := e.call(e.Alice, "crm.lookup", `{"id":"c-100"}`); err != nil {
+			return err
+		}
+		if err := e.rotate("gate-e2"); err != nil {
+			return err
+		}
+		// Whoever kept the old key appends one more receipt with it.
+		lines, err := e.appendForged(e.retired, kid, decisionFor("crm/lookup"))
+		if err != nil {
+			return err
+		}
+		return e.mustFail(lines, chain.ReasonWrongKey)
+	}},
+	{"K4", "keys", "W10", "Revoking a key costs the tail, not the history", func(e *Env) error {
+		if _, _, err := e.call(e.Alice, "crm.lookup", `{"id":"c-100"}`); err != nil {
+			return err
+		}
+		cp, err := e.checkpointNow()
+		if err != nil {
+			return err
+		}
+		// Everything after the last good checkpoint is what a compromise costs.
+		if _, _, err := e.call(e.Alice, "crm.lookup", `{"id":"c-101"}`); err != nil {
+			return err
+		}
+		revoked := []chain.Revoked{{Kid: kid, EffectiveSize: cp.Size}}
+		_, err = e.verifyFromGenesis(revoked)
+		var f *chain.Failure
+		if !errors.As(err, &f) {
+			return breach("receipts signed after the revocation still verified (err=%v)", err)
+		}
+		if f.Reason != chain.ReasonRevokedKey {
+			return breach("failed with %s (%s), want revoked_key", f.Reason, f.Detail)
+		}
+		if f.Seq != cp.Size {
+			return breach("refused from seq %d, want %d", f.Seq, cp.Size)
+		}
+		// The anchored history is untouched: it was good when it was anchored.
+		history, err := e.exportPrefix(cp.Size)
+		if err != nil {
+			return err
+		}
+		if _, err := chain.VerifyAll(bytes.NewReader(history), chainID, chain.Options{
+			Keys: e.genesisKeys(), Revocations: revoked}); err != nil {
+			return breach("the anchored history no longer verifies: %v", err)
+		}
+		return nil
+	}},
+	{"K5", "keys", "W10", "Revocation cannot condemn a checkpoint nobody anchored", func(e *Env) error {
+		if _, _, err := e.call(e.Alice, "crm.lookup", `{"id":"c-100"}`); err != nil {
+			return err
+		}
+		cp, err := e.checkpointNow()
+		if err != nil {
+			return err
+		}
+		signed, err := revocation.Sign(e.ca.Key, &revocation.Revocation{
+			V: revocation.Version, Domain: revocation.Domain, ChainID: chainID, Kid: kid,
+			// A size nothing anchors, so no one else can check the claim.
+			EffectiveSize: cp.Size + 1, EffectiveHead: cp.Head,
+			TS: time.Now().UTC().Format(receipt.TimeFormat),
+		})
+		if err != nil {
+			return err
+		}
+		line, err := signed.Line()
+		if err != nil {
+			return err
+		}
+		root, err := revocation.RootKey(e.ca.Cert)
+		if err != nil {
+			return err
+		}
+		// It is properly signed by the root; it is still refused, because what it
+		// names cannot be checked against anything.
+		revs, err := revocation.ReadVerified(bytes.NewReader(append(line, '\n')), chainID, root)
+		if err != nil {
+			return breach("a root-signed revocation did not read back: %v", err)
+		}
+		if _, err := revocation.Match(revs, []*checkpoint.Checkpoint{cp}); err == nil {
+			return breach("a revocation naming an unanchored checkpoint was accepted")
+		}
+		return nil
+	}},
+	{"K6", "keys", "W11", "Chain that never rotates is unaffected by any of this", func(e *Env) error {
+		if _, _, err := e.call(e.Alice, "crm.lookup", `{"id":"c-100"}`); err != nil {
+			return err
+		}
+		rep, err := e.verifyFromGenesis(nil)
+		if err != nil {
+			return breach("an unrotated log does not verify: %v", err)
+		}
+		if len(rep.Rotations) != 0 {
+			return breach("an unrotated log reported %d handovers", len(rep.Rotations))
+		}
+		// And it verifies the old way too, with a plain trust file and no root.
+		buf, err := e.export()
+		if err != nil {
+			return err
+		}
+		if _, err := chain.Verify(bytes.NewReader(buf), chainID, func(k string) (*composite.PublicKey, error) {
+			if k == kid {
+				return e.receiptKey.Public(), nil
+			}
+			return nil, errors.New("unknown key")
+		}); err != nil {
+			return breach("a chain with no rotation stopped verifying the old way: %v", err)
 		}
 		return nil
 	}},

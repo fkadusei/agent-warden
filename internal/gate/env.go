@@ -127,14 +127,21 @@ var unpinned = map[string]bool{"crm/export": true}
 
 // Env is one isolated Warden deployment for a scenario.
 type Env struct {
-	ctx        context.Context
+	ctx context.Context
+	// ca issues this deployment's certificates. Key rotation needs it twice over:
+	// it certifies an incoming receipt key, and it signs revocations (ADR-0016).
+	ca         *identity.CA
 	pool       *x509.CertPool
 	store      *store.Store
 	receiptKey *composite.PrivateKey
-	gw         *gateway.Gateway
-	tools      *toolHost
-	agentURL   string
-	approveURL string
+	// After a rotation: the key that handed over, the key signing now, and its
+	// key ID. receiptKey stays the key the chain began with.
+	retired, current *composite.PrivateKey
+	currentKid       string
+	gw               *gateway.Gateway
+	tools            *toolHost
+	agentURL         string
+	approveURL       string
 
 	// Task credentials.
 	Alice      tls.Certificate // support-agent-7 for alice@tenant-a (support role)
@@ -182,7 +189,7 @@ func newEnv(ctx context.Context) (e *Env, err error) {
 	if err != nil {
 		return nil, err
 	}
-	e.pool = ca.Pool()
+	e.ca, e.pool = ca, ca.Pool()
 	cred := func(agent, principal, task string) (tls.Certificate, error) {
 		k, err := mldsa.GenerateKey(mldsa.MLDSA65())
 		if err != nil {
