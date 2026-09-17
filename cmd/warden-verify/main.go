@@ -7,6 +7,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/mldsa"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -19,7 +21,9 @@ import (
 
 	"github.com/fkadusei/agent-warden/internal/chain"
 	"github.com/fkadusei/agent-warden/internal/checkpoint"
+	"github.com/fkadusei/agent-warden/internal/keyfile"
 	"github.com/fkadusei/agent-warden/internal/keys"
+	"github.com/fkadusei/agent-warden/internal/revocation"
 	"github.com/fkadusei/agent-warden/internal/tsa"
 )
 
@@ -51,10 +55,21 @@ type result struct {
 	Unanchored    int64   `json:"unanchored"`
 	OpenDecisions []int64 `json:"open_decisions,omitempty"`
 	Warning       string  `json:"warning,omitempty"`
+	// Rotations are the key handovers the log records (ADR-0016).
+	Rotations []chain.KeyHandover `json:"rotations,omitempty"`
+	// Revocations are the ones enforced against this log.
+	Revocations []revokedView `json:"revocations,omitempty"`
 	// Set when verification failed.
 	Stage   string         `json:"stage,omitempty"`
 	Failure *chain.Failure `json:"failure,omitempty"`
 	Error   string         `json:"error,omitempty"`
+}
+
+// revokedView is a revocation that was matched to its anchored checkpoint.
+type revokedView struct {
+	Kid    string `json:"kid"`
+	From   int64  `json:"effective_size"`
+	Reason string `json:"reason,omitempty"`
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
@@ -66,10 +81,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	anchorPath := fs.String("anchor", "", "anchored checkpoints, one per line (strongly recommended)")
 	tokensPath := fs.String("tsa-tokens", "", "RFC 3161 timestamps over the anchored checkpoints")
 	tsaRootsPath := fs.String("tsa-roots", "", "certificates trusted to act as timestamp authorities (PEM)")
+	rootPath := fs.String("root", "", "Warden root certificate, so key rotations in the log can be followed (PEM)")
+	revocationsPath := fs.String("revocations", "", "published revocations, one per line (needs --root and --anchor)")
 	asJSON := fs.Bool("json", false, "print the result as JSON")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: warden-verify --log FILE --chain ID --keys FILE [--anchor FILE]"+
-			" [--tsa-tokens FILE --tsa-roots FILE] [--json]")
+			" [--root FILE [--revocations FILE]] [--tsa-tokens FILE --tsa-roots FILE] [--json]")
 		fmt.Fprintln(stderr, "\nExit status: 0 verified, 1 verification failed, 2 usage or file error.")
 		fs.PrintDefaults()
 	}
@@ -96,6 +113,35 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	resolve := keys.Resolver(trusted)
 
+	if *revocationsPath != "" && (*rootPath == "" || *anchorPath == "") {
+		return usageErr("--revocations needs --root, which signs revocations, and --anchor, " +
+			"because a revocation is effective from an anchored checkpoint")
+	}
+
+	// With the root, the trust file need only hold the chain's first key: every
+	// later key is learned from the rotation receipts, each certified by the root
+	// (ADR-0016). Without it, a rotation fails closed.
+	var rotating *keys.Rotating
+	var rootKey *mldsa.PublicKey
+	chainKeys := chain.StaticKeys(resolve)
+	if *rootPath != "" {
+		der, err := keyfile.ReadCertificate(*rootPath)
+		if err != nil {
+			return usageErr("%v", err)
+		}
+		rootCert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return usageErr("%v", err)
+		}
+		if rootKey, err = revocation.RootKey(rootCert); err != nil {
+			return usageErr("%v", err)
+		}
+		pool := x509.NewCertPool()
+		pool.AddCert(rootCert)
+		rotating = keys.NewRotating(trusted, pool)
+		chainKeys = rotating
+	}
+
 	res := result{ChainID: *chainID}
 	emit := func(code int) int {
 		if *asJSON {
@@ -109,6 +155,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, res.Warning)
 		}
 		return code
+	}
+
+	// The anchor is read before the log, but a rotated chain's later checkpoints
+	// are signed by keys that only the log can introduce. So read the log once
+	// first to learn them; accepting the same rotation again is a no-op.
+	if rotating != nil && *anchorPath != "" {
+		lf, err := os.Open(*logPath)
+		if err != nil {
+			return usageErr("%v", err)
+		}
+		_, err = chain.VerifyAll(lf, *chainID, chain.Options{Keys: rotating})
+		lf.Close()
+		var failure *chain.Failure
+		switch {
+		case errors.As(err, &failure):
+			res.Stage, res.Failure = "log", failure
+			return emit(exitFailed)
+		case err != nil:
+			return usageErr("%v", err)
+		}
+		resolve = rotating.Resolve
 	}
 
 	var cps []*checkpoint.Checkpoint
@@ -125,6 +192,31 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	res.Checkpoints = len(cps)
+
+	var revoked []chain.Revoked
+	if *revocationsPath != "" {
+		f, err := os.Open(*revocationsPath)
+		if err != nil {
+			return usageErr("%v", err)
+		}
+		revs, err := revocation.ReadVerified(f, *chainID, rootKey)
+		f.Close()
+		if err != nil {
+			res.Stage, res.Error = "revocation", err.Error()
+			return emit(exitFailed)
+		}
+		// Each revocation has to name a checkpoint this anchor actually holds,
+		// before it is allowed to condemn anything.
+		effective, err := revocation.Match(revs, cps)
+		if err != nil {
+			res.Stage, res.Error = "revocation", err.Error()
+			return emit(exitFailed)
+		}
+		for _, e := range effective {
+			revoked = append(revoked, chain.Revoked{Kid: e.Kid, EffectiveSize: e.Size})
+			res.Revocations = append(res.Revocations, revokedView{Kid: e.Kid, From: e.Size, Reason: e.Reason})
+		}
+	}
 
 	if *tokensPath != "" || *tsaRootsPath != "" {
 		if *tokensPath == "" || *tsaRootsPath == "" || *anchorPath == "" {
@@ -175,7 +267,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	defer lf.Close()
 
-	rep, err := chain.VerifyWithCheckpoints(lf, *chainID, resolve, cps)
+	rep, err := chain.VerifyAll(lf, *chainID, chain.Options{Keys: chainKeys, Checkpoints: cps, Revocations: revoked})
 	var failure *chain.Failure
 	switch {
 	case errors.As(err, &failure):
@@ -186,6 +278,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	res.Verified = true
+	res.Rotations = rep.Rotations
 	res.Receipts = rep.Receipts
 	res.LastSeq = &rep.LastSeq
 	res.Head = rep.Head
@@ -225,6 +318,20 @@ func printText(w io.Writer, r result) {
 		}
 	} else {
 		row("checkpointed", "none")
+	}
+	for _, h := range r.Rotations {
+		detail := fmt.Sprintf("%s to %s at seq %d", h.From, h.To, h.Seq)
+		if h.Reason != "" {
+			detail += " (" + h.Reason + ")"
+		}
+		row("key rotation", detail)
+	}
+	for _, rev := range r.Revocations {
+		detail := fmt.Sprintf("%s, from seq %d onward", rev.Kid, rev.From)
+		if rev.Reason != "" {
+			detail += " (" + rev.Reason + ")"
+		}
+		row("revoked", detail)
 	}
 	if len(r.OpenDecisions) > 0 {
 		seqs := make([]string, len(r.OpenDecisions))

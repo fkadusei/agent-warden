@@ -43,12 +43,20 @@ bugs. Two are fixed in 6.5; the third is 6.6's.
    that was current when they were made — stopped resolving, and `serve` refused to start
    with `existing anchor: unknown key`. It now reads the anchor with every key the chain
    has used. *Fixed.*
-3. **The console's verifier** (found in 6.5). `console.verify` calls
-   `chain.VerifyWithCheckpoints` with a plain resolver, which now fails closed on a
-   rotation receipt, so the console would report a healthy rotated log as FAILED. It needs
-   the root, exactly as `warden-verify` does. *Left for 6.6, which does the same work for
-   the command-line verifier.*
-| 6.6 | **`warden-verify --revocations`** — check revocations alongside the anchor, match each against the checkpoint it names before enforcing it, fail a log whose tail was signed after that checkpoint, and report rotations and revocations in both text and JSON. Follow rotations from a root certificate, in `warden-verify` and in the console, which both verify with a plain resolver today | `cmd/warden-verify`, `cmd/warden` | 6.4 |
+3. **The console's verifier — and, more quietly, its feed** (found in 6.5).
+   `console.verify` called `chain.VerifyWithCheckpoints` with a plain resolver, which fails
+   closed on a rotation receipt, so the console would report a healthy rotated log as
+   FAILED. The quieter half was worse: `summarize` skips any receipt whose key it cannot
+   resolve, so the feed dropped everything the incoming key had signed and said nothing
+   about it. A verifier that fails loudly is a nuisance; a feed that silently omits
+   receipts is a lie. Both follow rotations now, given `--root`. *Fixed.*
+
+A fourth was avoided rather than found. `warden-verify` reads the anchor before the log,
+but a rotated chain's newer checkpoints are signed by keys only the log can introduce, so
+in that order a healthy chain fails to verify. The log is read once first to learn those
+keys — which is why `Rotating.Accept` was built to treat re-accepting a key it already
+holds as a no-op rather than a conflict.
+| 6.6 ✅ | **`warden-verify --root` and `--revocations`** — `--root` follows key rotations, so one trusted key and the root verify a whole rotated chain. `--revocations` enforces published revocations, but only after matching each to the anchored checkpoint it names: one naming a checkpoint that is not anchored, or one of that size in another history, is refused rather than applied. Rotations and revocations are reported in text and JSON. The anchor is read only *after* the log has introduced the chain's later keys, because a rotated chain's newer checkpoints are signed by keys the trust file has never seen. The console takes `--root` too, for its feed as much as its verify panel | `cmd/warden-verify`, `cmd/warden`, `internal/revocation` | 6.4 |
 | 6.7 | **Gate scenarios** — rotation mid-chain verifies; a rotation signed by the wrong key fails; a rotation whose incoming key is uncertified fails; receipts after a revocation's checkpoint fail; a log ending at the checkpoint still verifies; an unrotated chain is unchanged | `internal/gate`, tests | 6.5, 6.6 |
 | 6.8 | **Docs** — threat W11 rewritten (it currently has no mitigation), design §4.5, `docs/not-done.md`, README | docs | 6.7 |
 

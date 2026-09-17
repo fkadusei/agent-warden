@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,8 @@ import (
 	"github.com/fkadusei/agent-warden/internal/approverapi"
 	"github.com/fkadusei/agent-warden/internal/chain"
 	"github.com/fkadusei/agent-warden/internal/checkpoint"
+	"github.com/fkadusei/agent-warden/internal/composite"
+	"github.com/fkadusei/agent-warden/internal/keyfile"
 	"github.com/fkadusei/agent-warden/internal/keys"
 	"github.com/fkadusei/agent-warden/internal/receipt"
 	"github.com/fkadusei/agent-warden/internal/tsa"
@@ -36,6 +39,9 @@ type console struct {
 	token string
 	// log, keys, anchor, tokens describe an exported receipt log to read.
 	logPath, keysPath, anchorPath, tsaTokens, tsaRoots, chainID string
+	// rootPath, when set, lets the console follow key rotations: every key after
+	// the first is learned from the log and checked against this root (ADR-0016).
+	rootPath string
 	// approver is nil when the console is read-only.
 	approver *approverapi.Client
 	ttl      time.Duration
@@ -50,6 +56,7 @@ func cmdConsole(ctx context.Context, args []string, _ io.Reader, out io.Writer) 
 	anchorPath := fs.String("anchor", "", "anchored checkpoints (optional, strongly recommended)")
 	tsaTokens := fs.String("tsa-tokens", "", "RFC 3161 timestamps for the anchored checkpoints (optional)")
 	tsaRoots := fs.String("tsa-roots", "", "certificates trusted as timestamp authorities (optional)")
+	rootPath := fs.String("root", "", "Warden root certificate, so key rotations in the log can be followed (optional)")
 	approverURL := fs.String("url", "https://127.0.0.1:8444", "Warden's approver API")
 	caPath := fs.String("ca", "warden-local/pki/ca.pem", "Warden root certificate")
 	keyPath := fs.String("key", "", "approver private key; without it the console is read-only")
@@ -69,7 +76,7 @@ func cmdConsole(ctx context.Context, args []string, _ io.Reader, out io.Writer) 
 	}
 
 	c := &console{logPath: *logPath, chainID: *chainID, keysPath: *keysPath, anchorPath: *anchorPath,
-		tsaTokens: *tsaTokens, tsaRoots: *tsaRoots, ttl: *ttl}
+		tsaTokens: *tsaTokens, tsaRoots: *tsaRoots, rootPath: *rootPath, ttl: *ttl}
 	if *keyPath != "" {
 		client, err := approverClient(*approverURL, *caPath, *keyPath, *id)
 		if err != nil {
@@ -190,6 +197,7 @@ type verifyView struct {
 	Receipts     int    `json:"receipts"`
 	Checkpoints  int    `json:"checkpoints"`
 	Unanchored   int64  `json:"unanchored"`
+	Rotations    int    `json:"rotations,omitempty"`
 	Timestamps   int    `json:"timestamps,omitempty"`
 	EarliestTime string `json:"earliest_timestamp,omitempty"`
 }
@@ -216,9 +224,21 @@ func (c *console) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resolve := keys.Resolver(trusted)
+	chainKeys := chain.StaticKeys(resolve)
+	if c.rootPath != "" {
+		rotating, err := c.follow(logData, trusted)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("root: %v", err), http.StatusInternalServerError)
+			return
+		}
+		// Both the feed and the verify panel need the later keys: summarize skips
+		// receipts it cannot resolve, so without this a rotated log would quietly
+		// show nothing after the handover.
+		resolve, chainKeys = rotating.Resolve, rotating
+	}
 
 	out.Receipts = summarize(logData, resolve)
-	out.Verify = c.verify(logData, resolve)
+	out.Verify = c.verify(logData, chainKeys, resolve)
 	if c.approver != nil {
 		pending, err := c.approver.List(r.Context())
 		if err != nil {
@@ -288,7 +308,27 @@ func summarize(logData []byte, resolve chain.KeyResolver) []receiptView {
 	return out
 }
 
-func (c *console) verify(logData []byte, resolve chain.KeyResolver) verifyView {
+// follow reads the log once to learn every key its rotations introduce, each
+// checked against the root, so the keys are known before the anchor is read.
+func (c *console) follow(logData []byte, trusted map[string]*composite.PublicKey) (*keys.Rotating, error) {
+	der, err := keyfile.ReadCertificate(c.rootPath)
+	if err != nil {
+		return nil, err
+	}
+	root, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(root)
+	rotating := keys.NewRotating(trusted, pool)
+	// A log that does not verify is the verify panel's business to report, not
+	// this function's: it has still learned every key it could.
+	chain.VerifyAll(bytes.NewReader(logData), c.chainID, chain.Options{Keys: rotating})
+	return rotating, nil
+}
+
+func (c *console) verify(logData []byte, chainKeys chain.Keys, resolve chain.KeyResolver) verifyView {
 	var cps []*checkpoint.Checkpoint
 	anchorMissing := false
 	if c.anchorPath != "" {
@@ -307,7 +347,7 @@ func (c *console) verify(logData []byte, resolve chain.KeyResolver) verifyView {
 			}
 		}
 	}
-	rep, err := chain.VerifyWithCheckpoints(bytes.NewReader(logData), c.chainID, resolve, cps)
+	rep, err := chain.VerifyWithKeys(bytes.NewReader(logData), c.chainID, chainKeys, cps)
 	if err != nil {
 		var f *chain.Failure
 		if errors.As(err, &f) {
@@ -326,7 +366,7 @@ func (c *console) verify(logData []byte, resolve chain.KeyResolver) verifyView {
 		}
 	}
 	v := verifyView{OK: true, Detail: detail, Receipts: rep.Receipts,
-		Checkpoints: len(cps), Unanchored: rep.Unanchored}
+		Checkpoints: len(cps), Unanchored: rep.Unanchored, Rotations: len(rep.Rotations)}
 	if c.tsaTokens != "" && c.tsaRoots != "" && c.anchorPath != "" {
 		v.Timestamps, v.EarliestTime = c.timestamps()
 	}
