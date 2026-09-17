@@ -125,7 +125,13 @@ agent ──propose──► identify → pin → check args → policy → RECE
   checkpointed into an anchor with RFC 9162 Merkle roots and optional RFC 3161
   timestamps (ADR-0014).
 
-Not yet: key rotation and revocation, and richer output inspection.
+- **Key rotation:** a chain hands over to a new signing key with a receipt signed by the
+  outgoing key and certified by the root, so one trusted key and the root still verify the
+  whole chain. Revoking a key is effective from a named anchored checkpoint: you lose the
+  tail, not the history (ADR-0016).
+
+Not yet: richer output inspection, hardware-backed custody for signing keys, and any
+rotation story for approver keys.
 [`docs/not-done.md`](docs/not-done.md) lists every gap, including the structural ones.
 
 ## Run Warden locally
@@ -169,6 +175,19 @@ go run ./cmd/warden export --out warden-local/receipts.jsonl   # prints the veri
 
 `warden-local/` holds private keys and is ignored by git; delete it to start over.
 
+**Rotate the signing key.** Stop `serve` first — it holds both the key and the log:
+
+```sh
+go run ./cmd/warden rotate-key --kid warden-e2    # certifies the new key and hands over
+go run ./cmd/warden revoke-key --kid warden-e1    # only after a key is compromised
+```
+
+`rotate-key` writes the incoming key 0600, adds its public half to `keys.json`, and
+updates `warden.json`, so the next `serve` picks it up. The chain continues: the handover
+is a receipt in the log, and `warden-verify --root warden-local/pki/ca.pem` follows it
+from the key the chain began with. `revoke-key` is effective from the last anchored
+checkpoint and needs the root's key, which a real deployment keeps offline (ADR-0016).
+
 **Serve a scenario.** `scenarios/` holds attack and benign scenarios (planted
 instructions, another tenant's ticket, customer data leaving). Start the tools with
 `go run ./cmd/example-tools --scenario deputy-ticket-refund` and the read-only tools
@@ -211,6 +230,15 @@ bin/warden-verify --log receipts.jsonl --chain CHAIN_ID --keys trusted-keys.json
 
 Exit status is `0` when the log verifies, `1` when verification fails, and `2` for usage
 or file errors. Add `--json` for machine-readable output.
+
+If the chain has ever rotated its signing key, add `--root warden-local/pki/ca.pem`. The
+log's own `key_rotation` receipts then introduce each later key, each checked against the
+root before it is trusted to sign anything, so `--keys` need only hold the key the chain
+began with. Without `--root` a rotated log fails closed rather than verifying against a
+key nothing vouched for. Add `--revocations revocations.jsonl` to enforce published
+revocations as well: each is matched to the anchored checkpoint it names before it
+condemns anything, and receipts signed from that checkpoint onward are refused while
+everything the checkpoint covers still verifies (ADR-0016).
 
 If Warden was configured with a timestamp authority (`tsa.url`), add
 `--tsa-tokens tokens.jsonl --tsa-roots tsa-roots.pem`: each anchored checkpoint's

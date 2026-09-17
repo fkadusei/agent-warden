@@ -1,6 +1,6 @@
 # Phase 6 plan — key rotation and revocation
 
-- **Status:** In progress
+- **Status:** Complete
 - **Date:** 2026-09-16
 - **Goal:** close the largest gap in `docs/not-done.md`: retire a signing key on a
   schedule, and react to a compromised one, without abandoning the chain.
@@ -58,7 +58,7 @@ keys — which is why `Rotating.Accept` was built to treat re-accepting a key it
 holds as a no-op rather than a conflict.
 | 6.6 ✅ | **`warden-verify --root` and `--revocations`** — `--root` follows key rotations, so one trusted key and the root verify a whole rotated chain. `--revocations` enforces published revocations, but only after matching each to the anchored checkpoint it names: one naming a checkpoint that is not anchored, or one of that size in another history, is refused rather than applied. Rotations and revocations are reported in text and JSON. The anchor is read only *after* the log has introduced the chain's later keys, because a rotated chain's newer checkpoints are signed by keys the trust file has never seen. The console takes `--root` too, for its feed as much as its verify panel | `cmd/warden-verify`, `cmd/warden`, `internal/revocation` | 6.4 |
 | 6.7 ✅ | **Gate scenarios** — six gates, K1–K6, against a live deployment rather than a reconstructed log: a chain that rotates mid-session still verifies from the key it began with; a stolen signing key alone cannot introduce a new one; a retired key cannot sign after handing over; revoking a key costs the tail and not the anchored history; a revocation cannot condemn a checkpoint nobody anchored; and a chain that never rotates is unaffected by any of it. Each was mutation-tested: removing the defence a gate rests on makes that gate, and no other, fail | `internal/gate` | 6.5, 6.6 |
-| 6.8 | **Docs** — threat W11 rewritten (it currently has no mitigation), design §4.5, `docs/not-done.md`, README | docs | 6.7 |
+| 6.8 ✅ | **Docs** — W11 rewritten to describe what was actually built, with a residual-risk note saying plainly that rotation shortens future exposure and does not repair the past; design §4.4/§4.5, the receipt-type list, the `warden-verify` flags, the failure reasons and the phase table, in both `design.md` and its hand-maintained HTML twin; `docs/not-done.md`; README | docs | 6.7 |
 
 ## Questions this phase had to settle
 

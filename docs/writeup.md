@@ -166,8 +166,11 @@ common failure in practice.
 
 ## What is deliberately not solved
 
-- **Key rotation and revocation** are designed but not built; today a compromised
-  signing key means the log's future, not its past, is in doubt.
+- **Rotation does not repair the past.** A chain can hand over to a new signing key, and a
+  compromised key can be revoked (ADR-0016), but whoever holds a key can sign a rotation
+  with it: a compromise still costs everything after the last good anchored checkpoint.
+  Signing keys live in a file rather than in hardware, and approver keys have no rotation
+  story at all.
 - **Output inspection is shallow** by design, and stays a signal for policy.
 - **Warden is trusted at runtime.** It decides and signs; the threat model says so, and
   the mitigation is that its decisions are externally verifiable, not that it cannot be

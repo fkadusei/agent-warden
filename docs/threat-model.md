@@ -4,9 +4,11 @@ Warden's job is to let an AI agent use tools **without trusting the model**, and
 to leave behind a record of every action that **a third party can verify without
 trusting Warden's operator**.
 
-Each threat lists the mitigation **and the test that will prove it**. A mitigation
-we cannot demonstrate is treated as unverified. Nothing here is implemented yet;
-the tests are the acceptance criteria for the build.
+Each threat lists the mitigation **and the test that proves it**. A mitigation we
+cannot demonstrate is treated as unverified. The tests named here are the gate
+suite (`internal/gate`, runnable as `go run ./cmd/warden-gate`), which runs every
+scenario against a live deployment on each push. Where a mitigation is not built,
+the threat says so, and `docs/not-done.md` lists every such gap.
 
 ---
 
@@ -173,13 +175,27 @@ a stated, tunable parameter.
 **Threat.** An attacker obtains a receipt signing key and forges or rewrites
 history.
 **Mitigation.** The key lives only in Warden (never the agent), behind a signer
-interface that supports hardware-backed custody. Keys are short-epoch and rotated
-by a receipt signed by both the old and new keys. Anchored checkpoints bound the
-damage: history before the last anchor cannot be rewritten even with the key.
-Compromise triggers revocation of the key's certificate, and verifiers reject
-receipts under a revoked key after the revocation time.
-**Test.** Rotate keys mid-log and verify across the boundary; forge a receipt with
-a revoked key dated after revocation — rejected.
+interface that supports hardware-backed custody. A chain is signed by one key at a
+time and hands over with a `key_rotation` receipt (ADR-0016): the outgoing key signs
+the handover **and** the root certifies the incoming key, so taking a chain over
+needs the old key *and* the root — strictly more than either alone. A verifier walks
+forward from one trusted key and learns each later key from the log, so an auditor's
+trust file never grows. Anchored checkpoints bound the damage: history before the
+last anchor cannot be rewritten even with the key. Revocation is signed by the root,
+the one authority a stolen signing key cannot impersonate, and takes effect from a
+named anchored checkpoint: receipts that key signed after it are refused, and
+everything the checkpoint covers still verifies.
+**Test.** Gates K1–K5. A chain that rotates mid-session verifies from the key it
+began with; a key certified by anything other than the root is refused; a retired
+key cannot sign once it has handed over; receipts after a revocation's checkpoint
+are refused while the anchored history still verifies; and a revocation naming a
+checkpoint nobody anchored is refused.
+**Residual risk.** Rotation shortens *future* exposure; it does not repair the past.
+Whoever holds a key can sign a rotation with it, so rotation alone cannot recover
+from a compromise — and a compromise still costs everything after the last good
+anchored checkpoint. Revoking a key needs the root's private key, which a sensible
+deployment keeps offline; that is deliberate, because a revocation is the statement
+an attacker most wants to forge.
 
 ### W12 — Harvest now, forge later
 

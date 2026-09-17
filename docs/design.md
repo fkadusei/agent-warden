@@ -118,9 +118,9 @@ signing, so the same receipt always produces the same bytes.
 | `kid` (protected header, not the payload) | Which signing key epoch; resolves to a certificate | W11 |
 
 Receipt types: `decision`, `approval`, `result`, `key_rotation`, `checkpoint`.
-Implemented in `internal/receipt`: `decision`, `result`, and `approval` (ADR-0009).
-`key_rotation` and `checkpoint` are reserved; until implemented, receipts of those
-types are refused rather than accepted. Checkpoints (§4.4) turned out not to need a receipt
+Implemented in `internal/receipt`: `decision`, `result`, `approval` (ADR-0009), and
+`key_rotation` (ADR-0016). `checkpoint` remains reserved, and receipts of that type
+are refused rather than accepted. Checkpoints (§4.4) turned out not to need a receipt
 type: they are separate signed statements, kept outside the log.
 
 A `result` receipt carries the same `task_id`, `actor`, and `call` as its decision,
@@ -205,8 +205,8 @@ $500?") from the receipt alone.
   write. It only appends; making the file write-once is the job of where it lives
   (an append-only filesystem flag, WORM storage, or another account). Reading an
   anchor verifies every signature and requires strictly growing sizes and
-  non-decreasing timestamps. **Not yet implemented:** RFC 3161 timestamps and
-  witnesses.
+  non-decreasing timestamps. RFC 3161 timestamps over the anchored bytes are
+  implemented (ADR-0014). **Not yet implemented:** witnesses.
 - **Checking a log against checkpoints** (`chain.VerifyWithCheckpoints`): every
   anchored checkpoint must match the log's prefix of its size. A shorter log means
   receipts were removed; a different root or head means a rewrite, or an anchor
@@ -231,22 +231,41 @@ $500?") from the receipt alone.
 - Task credentials are ML-DSA-65 certificates naming the agent, principal, and task in
   `urn:warden:` SAN URIs, valid for at most 15 minutes plus 1 minute of clock skew,
   with client-authentication key usage.
-- **Rotation:** a `key_rotation` receipt signed by the outgoing key names the incoming
-  key; the incoming key signs the next receipt. Verification crosses the boundary.
-- **Revocation:** receipts under a revoked key dated after the revocation time fail
-  verification; receipts before the last anchored checkpoint still verify.
+- **Rotation (ADR-0016):** a `key_rotation` receipt names the outgoing and incoming key
+  IDs, the incoming key's digest, and its key-epoch certificate. It is signed by the
+  outgoing key **and** the incoming key is certified by the root, so taking a chain over
+  needs both. One key signs a chain at a time — the key bound into the genesis parameters
+  until the handover, the incoming key after it — and a retired key signing again is a
+  verification failure. A verifier starts from one trusted key and learns each later key
+  from the log, so the trust file does not grow. `warden rotate-key` performs it: certify,
+  append the handover, write the new key 0600, and update the configuration together.
+- **Revocation (ADR-0016):** a revocation names a key and the last checkpoint believed
+  good, by size **and** head, so it cannot be re-aimed at a fork of the same length. It is
+  signed by the root and published beside the anchor rather than in the log, so a
+  compromised Warden cannot quietly drop the notice that its key is compromised. Receipts
+  that key signed from that checkpoint onward are refused; everything the checkpoint
+  covers still verifies. You lose the tail, not the history.
 
 ## 5. What `warden-verify` proves
 
 ```
-warden-verify --log receipts.jsonl --chain CHAIN_ID --keys trusted-keys.json --anchor anchor.jsonl [--json]
+warden-verify --log receipts.jsonl --chain CHAIN_ID --keys trusted-keys.json --anchor anchor.jsonl \
+              [--root ca.pem [--revocations revocations.jsonl]] [--json]
 ```
 
 - **`--keys`** is a JWK Set of public keys in the draft's `AKP` format
-  (`kty`, `alg`, `kid`, `pub`). This is interim trust input until key-epoch
-  certificates exist (ADR-0008), when it becomes a root certificate. The file is
+  (`kty`, `alg`, `kid`, `pub`). It need hold only the key the chain began with when
+  `--root` is given (ADR-0016); without it, every key the chain has used. The file is
   rejected if any key contains private key material, has the wrong algorithm, or
   repeats a `kid`.
+- **`--root`** is the Warden root certificate, and is what lets the log's own rotation
+  receipts introduce later keys: each is checked against the root before it is trusted
+  to sign anything. Without it a rotated log fails closed rather than verifying against
+  a key nothing has vouched for.
+- **`--revocations`** takes published revocations; it needs `--root`, which signs them,
+  and `--anchor`, because a revocation is effective from an anchored checkpoint. Each is
+  matched to the checkpoint it names before it is enforced: one naming a checkpoint that
+  is not anchored, or one of that size in another history, is refused rather than applied.
 - **`--chain`** is required, so the log can't choose which chain it claims to be.
 - **`--anchor`** is optional but strongly recommended. Without it, the result carries
   a warning that truncation and full rewrites by the key holder are undetectable.
@@ -285,10 +304,14 @@ Implemented in `internal/chain.Verify`:
 | `duplicate_approval` | A decision already has an approval |
 | `self_approval` | The approver is the principal who requested the call |
 | `checkpoint_mismatch` | The log is shorter than an anchored checkpoint, its prefix hashes differently, or the checkpoint is for another chain |
+| `wrong_key` | A key signed that is not the chain's current one — including a key the chain has retired |
+| `bad_rotation` | A `key_rotation` receipt hands over from a key other than the one that signed it, or its certificate is unreadable |
+| `uncertified_key` | The key a rotation introduces is not certified by the root, or is not the key the rotation names |
+| `revoked_key` | The signing key was revoked effective from a checkpoint at or before this receipt |
 
-Still to come: `revoked_key` (with certificates). On success, the report also lists
-**open decisions** (allowed decisions with no result receipt, which are either still
-running or a gap to investigate), plus `Checkpointed` and `Unanchored`.
+On success, the report also lists **open decisions** (allowed decisions with no result
+receipt, which are either still running or a gap to investigate), any **key rotations**
+the log records, plus `Checkpointed` and `Unanchored`.
 
 **What checkpoints add, tested both ways:** without a checkpoint, truncating the
 newest receipts and rewriting the whole log with the real key both still verify.
@@ -333,11 +356,12 @@ with the model name and version, because they change with the model.
 | Phase | Deliverable | Gate |
 |---|---|---|
 | **0** | This design, the threat model, ADRs 0001–0008 | Owner review |
-| **1** ✅ | Receipt library: JCS, composite signer, chain, commitments, checkpoints, `warden-verify` | Draft test vectors pass; tamper tests fail verification as expected. **Deferred:** RFC 3161 anchoring, key-epoch certificates, key rotation and revocation, approval receipts |
+| **1** ✅ | Receipt library: JCS, composite signer, chain, commitments, checkpoints, `warden-verify` | Draft test vectors pass; tamper tests fail verification as expected. **Deferred then delivered:** RFC 3161 anchoring (Phase 4), key-epoch certificates (Phase 2), approval receipts (Phase 2), key rotation and revocation (Phase 6) |
 | **2** ✅ | Gateway: identity, policy, approvals, broker, registry, write-ahead receipts | `authz`, `approval`, `poison`, fail-closed tests pass (`warden-gate`: 25 attacks refused) |
 | **3** ✅ | Output inspector + demo agent + synthetic tools | `injection`, `exfil`, `deputy` scenarios run end to end (scripted compromised agent: 10/10 attacks blocked, 3/3 benign tasks completed, in `go test` and through `warden serve` with the Python agent) |
 | **4** ✅ | Benchmark run with/without Warden; checkpoints + anchoring | Published: 47/62 attack calls succeeded without Warden, 0/62 with it, 20/20 benign both ways (`docs/benchmark.html`); RFC 3161 timestamps on anchored checkpoints (ADR-0014) |
 | **5** ✅ | README, demo video, write-up | `docs/writeup.md`, a recorded demo (`docs/demo.gif`), the `warden console` (ADR-0015), CI on every push, and `docs/not-done.md` |
+| **6** ✅ | Key rotation and revocation | `key_rotation` receipts signed by the outgoing key and certified by the root (ADR-0016); `warden rotate-key` and `revoke-key`; `warden-verify --root --revocations`; gates K1–K6, each mutation-tested |
 
 ## 8. Open questions
 

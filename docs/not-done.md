@@ -5,14 +5,13 @@ not a rough edge: none of it is hidden by the tests or the benchmark.
 
 ## Designed, not built
 
-**Key rotation and revocation.** ADR-0003 reserves a `key_rotation` receipt type and
-`warden-verify` knows the type exists, but nothing issues or honours one. The practical
-effect: a compromised receipt-signing key puts the log's *future* in doubt, not its past
-(old receipts are still covered by their checkpoints and timestamps), and there is no way
-to retire a key without starting a new chain. This is the largest missing piece.
-
 **Approver key handling.** Approvers hold a key file. There is no hardware backing, no
-per-approval device confirmation, and no rotation story for those keys either.
+per-approval device confirmation, and no rotation story for approver keys — receipt
+signing keys rotate and can be revoked (ADR-0016); these cannot.
+
+**A signer interface, but only one signer.** Receipt keys live in a file at mode 0600.
+The design calls for a signer interface with PKCS#11 or KMS behind it, and nothing here
+implements one, so custody is as good as the host's filesystem.
 
 ## Deliberately shallow
 
@@ -58,6 +57,14 @@ permit-everything policy and requiring every policy-dependent attack to succeed.
 
 ## Smaller things
 
+- Rotating a key means stopping Warden first: the running server holds the receipt key and
+  the store, and `warden rotate-key` opens the same store. It refuses rather than
+  corrupting anything, but it is a restart, not a hot swap.
+- `warden revoke-key` needs the root's private key, which a sensible deployment keeps
+  offline. That is the intended cost of revocation, not an oversight, but it does mean
+  revoking is a break-glass errand rather than a command you can script.
+- `warden-verify` and the console follow rotations only when given `--root`. Without it a
+  rotated log fails closed — correct, but it is a flag an auditor has to know to pass.
 - The console shows an exported snapshot, not a live tail; refreshing is one command.
 - The console has no authentication beyond a loopback bind and a startup token, and holds
   an approver key in memory while it runs with one (ADR-0015).
