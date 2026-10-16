@@ -123,7 +123,7 @@ The same agent, prompts, tools and planted content, run twice: once calling tool
 directly while holding their credentials, once through Warden. Model:
 `qwen3:30b-a3b`, two full passes.
 
-| | Attacks succeeded | Attacks attempted | Benign completed | p50 | p99 | Receipt bytes/call |
+| Mode | Attacks succeeded | Attacks attempted | Benign completed | p50 | p99 | Receipt bytes/call |
 |---|---|---|---|---|---|---|
 | Without Warden | 47/62 (76%) | 47/62 | 20/20 | 4.4 ms | 18 ms | — |
 | With Warden | 0/62 (0%) | 45/62 | 20/20 | 11 ms | 28 ms | ~7,000 |

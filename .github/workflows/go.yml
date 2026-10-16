@@ -33,6 +33,12 @@ jobs:
       - name: Tests
         run: go test ./...
 
+      # docs/design.html and docs/writeup.html are kept by hand beside their
+      # Markdown. This also runs under `go test`; as its own step, a failure names
+      # the heading, table cell, or decision where the two copies now disagree.
+      - name: HTML docs match their Markdown
+        run: go test -v -run 'TestHTMLMatchesMarkdown|TestTheCheckSeesTheDocs' ./internal/doccheck
+
       # The gates are the guarantee: a scripted, fully compromised agent must get
       # nothing through. They also run under `go test`, but a non-zero exit here names
       # the failing defence directly in the log.
