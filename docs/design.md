@@ -355,7 +355,7 @@ with the model name and version, because they change with the model.
 
 | Phase | Deliverable | Gate |
 |---|---|---|
-| **0** | This design, the threat model, ADRs 0001–0008 | Owner review |
+| **0** ✅ | This design, the threat model, ADRs 0001–0008 | Owner review |
 | **1** ✅ | Receipt library: JCS, composite signer, chain, commitments, checkpoints, `warden-verify` | Draft test vectors pass; tamper tests fail verification as expected. **Deferred then delivered:** RFC 3161 anchoring (Phase 4), key-epoch certificates (Phase 2), approval receipts (Phase 2), key rotation and revocation (Phase 6) |
 | **2** ✅ | Gateway: identity, policy, approvals, broker, registry, write-ahead receipts | `authz`, `approval`, `poison`, fail-closed tests pass (`warden-gate`: 25 attacks refused) |
 | **3** ✅ | Output inspector + demo agent + synthetic tools | `injection`, `exfil`, `deputy` scenarios run end to end (scripted compromised agent: 10/10 attacks blocked, 3/3 benign tasks completed, in `go test` and through `warden serve` with the Python agent) |

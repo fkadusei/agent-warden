@@ -1,6 +1,6 @@
 # ADR-0004: Fail closed with write-ahead receipts
 
-- **Status:** Proposed
+- **Status:** Accepted (owner, 2026-10-16)
 - **Date:** 2026-09-14
 - **Related:** threat W8
 

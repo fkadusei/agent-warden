@@ -1,6 +1,6 @@
 # ADR-0002: Hybrid composite ML-DSA-65 + Ed25519 receipt signatures
 
-- **Status:** Proposed
+- **Status:** Accepted (owner, 2026-10-16)
 - **Date:** 2026-09-14
 - **Related:** threat W12 (harvest now, forge later), ADR-0003
 

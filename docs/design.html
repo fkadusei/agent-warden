@@ -331,7 +331,7 @@ agent ◄──result (tagged)───┘</code></pre>
 <div class="table-wrap"><table>
   <thead><tr><th>Phase</th><th>Deliverable</th><th>Gate</th></tr></thead>
   <tbody>
-    <tr><td><strong>0</strong></td><td>This design, the threat model, ADRs 0001–0008</td><td>Owner review</td></tr>
+    <tr><td><strong>0</strong> <span class="pill g">done</span></td><td>This design, the threat model, ADRs 0001–0008</td><td>Owner review</td></tr>
     <tr><td><strong>1</strong> <span class="pill g">done</span></td><td>Receipt library: JCS, composite signer, chain, commitments, checkpoints, <code>warden-verify</code></td><td>Draft test vectors pass; tamper tests fail verification as expected. <strong>Deferred then delivered:</strong> RFC 3161 anchoring (Phase 4), key-epoch certificates (Phase 2), approval receipts (Phase 2), key rotation and revocation (Phase 6)</td></tr>
     <tr><td><strong>2</strong> <span class="pill g">done</span></td><td>Gateway: identity, policy, approvals, broker, registry, write-ahead receipts</td><td><code>authz</code>, <code>approval</code>, <code>poison</code>, fail-closed tests pass (<code>warden-gate</code>: 25 attacks refused)</td></tr>
     <tr><td><strong>3</strong> <span class="pill g">done</span></td><td>Output inspector + demo agent + synthetic tools</td><td><code>injection</code>, <code>exfil</code>, <code>deputy</code> scenarios run end to end (scripted compromised agent: 10/10 attacks blocked, 3/3 benign tasks completed, in <code>go test</code> and through <code>warden serve</code> with the Python agent)</td></tr>
@@ -533,7 +533,7 @@ agent ◄──result (tagged)───┘</code></pre>
 </div>
 
 <div class="adr" id="adr2">
-  <h3>ADR-0002 — Hybrid composite ML-DSA-65 + Ed25519 receipt signatures <span class="pill">Proposed</span></h3>
+  <h3>ADR-0002 — Hybrid composite ML-DSA-65 + Ed25519 receipt signatures <span class="pill g">Accepted</span></h3>
   <p><strong>Decision.</strong> Sign receipts with composite <code>ML-DSA-65-Ed25519</code> per <code>draft-ietf-jose-pq-composite-sigs-04</code> in a JWS envelope, pinning the draft revision in the protected header (<code>alg_ref</code>). Build on the Go standard library's ML-DSA-65 and Ed25519 primitives, implement only the composite construction, gate it on the draft's test vectors. Both components required; no single-component fallback.</p>
   <p><strong>Why.</strong> Receipts are long-lived evidence (W12). ML-DSA is standardized (FIPS 204; JOSE/COSE encoding published as RFC 9964) but young; a hybrid holds if either algorithm breaks.</p>
   <p><strong>Consequences.</strong> ~3.4 KB per receipt. If the draft changes, bump the receipt version; old receipts stay verifiable under their pinned <code>alg_ref</code>. ML-DSA-65 alone (RFC 9964) is the fallback as a new version, never a silent downgrade.</p>
@@ -541,7 +541,7 @@ agent ◄──result (tagged)───┘</code></pre>
 </div>
 
 <div class="adr" id="adr3">
-  <h3>ADR-0003 — Hash chain, signed checkpoints, and external anchoring <span class="pill">Proposed</span></h3>
+  <h3>ADR-0003 — Hash chain, signed checkpoints, and external anchoring <span class="pill g">Accepted</span></h3>
   <p><strong>Decision.</strong> Chain receipts with <code>seq</code> + <code>prev</code>; every <em>N</em> receipts or <em>T</em> seconds sign a checkpoint <code>{chain_id, size, root}</code> over a Merkle tree; anchor each checkpoint outside Warden's control (write-once file or RFC 3161 in v1); verify against the most recent anchor and report the exposure window.</p>
   <p><strong>Why.</strong> Per-receipt signatures prove authenticity, not completeness. A chain alone misses truncation, full rewrites by the key holder, and forks.</p>
   <p><strong>Consequences.</strong> Tampering before the last anchor is detectable even with the key. The window after it (default 100 receipts / 60 s) is named, not hidden. Anchor outages degrade evidence strength but don't stop tool calls.</p>
@@ -549,7 +549,7 @@ agent ◄──result (tagged)───┘</code></pre>
 </div>
 
 <div class="adr" id="adr4">
-  <h3>ADR-0004 — Fail closed with write-ahead receipts <span class="pill">Proposed</span></h3>
+  <h3>ADR-0004 — Fail closed with write-ahead receipts <span class="pill g">Accepted</span></h3>
   <p><strong>Decision.</strong> No receipt, no action. A call runs only after its <code>decision</code> receipt is durably written; on write failure the call is refused. A missing <code>result</code> receipt after execution is detectable and alerts.</p>
   <p><strong>Why.</strong> Best-effort audit pipelines drop events exactly when something is already going wrong.</p>
   <p><strong>Consequences.</strong> Receipt storage is on the availability path — an outage stops tool use, intentionally. Signing and fsync add per-call latency, measured in the benchmark.</p>
@@ -557,7 +557,7 @@ agent ◄──result (tagged)───┘</code></pre>
 </div>
 
 <div class="adr" id="adr5">
-  <h3>ADR-0005 — Commitments, not raw data, in receipts <span class="pill">Proposed</span></h3>
+  <h3>ADR-0005 — Commitments, not raw data, in receipts <span class="pill g">Accepted</span></h3>
   <p><strong>Decision.</strong> <code>commitment = SHA-256(salt ‖ JCS(value))</code> with a fresh 32-byte salt per value. Raw values and salts are stored separately under access control and disclosed selectively.</p>
   <p><strong>Why.</strong> Receipts are meant to be shared; raw data would make every verifier a data recipient, and plain redaction can't prove what a call contained.</p>
   <p><strong>Consequences.</strong> Share receipts widely; prove one call without revealing others; delete value + salt for retention obligations and the receipt still verifies. The separate data store becomes a new asset to protect.</p>

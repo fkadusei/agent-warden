@@ -1,6 +1,6 @@
 # ADR-0003: Hash chain, signed checkpoints, and external anchoring
 
-- **Status:** Proposed
+- **Status:** Accepted (owner, 2026-10-16)
 - **Date:** 2026-09-14
 - **Related:** threats W9, W10, W11; ADR-0002
 

@@ -1,6 +1,6 @@
 # ADR-0005: Commitments, not raw data, in receipts
 
-- **Status:** Proposed
+- **Status:** Accepted (owner, 2026-10-16)
 - **Date:** 2026-09-14
 - **Related:** threat W13; ADR-0003
 
