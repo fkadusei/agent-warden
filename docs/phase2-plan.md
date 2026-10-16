@@ -1,6 +1,6 @@
 # Phase 2 plan — the gateway
 
-- **Status:** In progress
+- **Status:** Complete (2026-09-15)
 - **Date:** 2026-09-14
 - **Goal (design §7):** identity, policy, approvals, credential broker, tool registry,
   and write-ahead receipts, with the `authz`, `approval`, `poison`, and fail-closed
@@ -13,9 +13,9 @@ comes last, so every security decision is testable without a protocol in the way
 
 | Step | Component | Package | Threats | Depends on |
 |---|---|---|---|---|
-| 2.1 | **Durable write-ahead receipt store** | `internal/store` | W8, W9 | Phase 1 |
-| 2.2 | **Tool registry** — pin each tool manifest by digest; refuse changed manifests | `internal/registry` | W5 | 2.1 |
-| 2.3 | **Policy** — Cedar, two-action pattern, `policy_revision` = digest of the policy set | `internal/policy` | W1, W2, W4 | — |
+| 2.1 ✅ | **Durable write-ahead receipt store** | `internal/store` | W8, W9 | Phase 1 |
+| 2.2 ✅ | **Tool registry** — pin each tool manifest by digest; refuse changed manifests | `internal/registry` | W5 | 2.1 |
+| 2.3 ✅ | **Policy** — Cedar, two-action pattern, `policy_revision` = digest of the policy set | `internal/policy` | W1, W2, W4 | — |
 | 2.4 ✅ | **Approvals** — approval receipts, single-use, distinct approver, bound to the call and an expiry. The `warden approve` CLI moves to 2.7–2.8, since it needs the running gateway to list and submit pending decisions | `internal/approval` | W6 | 2.1, **ADR-0009** |
 | 2.5 ✅ | **Identity** — root, key-epoch certificates, and short-lived task credentials (plain ML-DSA-65 X.509) naming agent, principal, and task. Certificate profile changed to SAN URIs + policy OIDs because Go 1.27 cannot handle the UUID OID in extensions (ADR-0010) | `internal/identity` | W3, W4 | ADR-0010 |
 | 2.6 ✅ | **Credential broker** — inject tool credentials at execution; the agent never holds them. Secrets come only from `WARDEN_SECRET_*` variables or owner-only files; missing secrets refuse the call; echoed credentials are scrubbed | `internal/broker` | W3 | 2.5 |

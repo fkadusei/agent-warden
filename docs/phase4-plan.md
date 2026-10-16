@@ -1,6 +1,6 @@
 # Phase 4 plan — the benchmark
 
-- **Status:** In progress
+- **Status:** Complete (2026-09-16)
 - **Date:** 2026-09-15
 - **Goal (design §6, §7):** attack success rate **without** Warden vs. **with** Warden,
   over the same scenarios, model, and tools, published with the benign-task completion
