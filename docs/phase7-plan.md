@@ -58,7 +58,7 @@ the design, not different between them.
 
 | Step | Component | Where | Depends on |
 |---|---|---|---|
-| 7.6 | **ADR-0017: the external anchor** — which store, what an anchored entry contains, how a verifier fetches it, and what the operator can still do to it (see question 1) | `docs/decisions` | — |
+| 7.6 ✅ | **ADR-0017: the external anchor** — an S3-compatible store with Object Lock in compliance mode, chosen by the owner. Object Lock protects versions, not names, so the verifier lists every version and delete marker and fails on an unlocked version or two different sets of bytes under one name. Objects hold the exact checkpoint line, so tokens and file anchors keep working. Conditional PUTs make retries safe. The store's own `LastModified` bounds each checkpoint's time. The client and SigV4 are written in Warden instead of adding the AWS SDK to `warden-verify`. What the operator can still do is listed, starting with simply not anchoring | `docs/decisions` | — |
 | 7.7 | **The anchor** — an implementation of `checkpoint.Anchor` for the chosen store, isolated in its own package. The file anchor stays, and both can be configured at once. Publishing is best effort: a failure is logged and retried at the next checkpoint, never blocking a call | `internal/anchor/…`, `cmd/warden` | 7.6 |
 | 7.8 | **Verifying against it** — `warden-verify` reads checkpoints from the external anchor, not only from a file the operator hands over, and reports which anchor each checkpoint came from and when it was anchored | `cmd/warden-verify`, `internal/checkpoint` | 7.7 |
 | 7.9 | **Gate scenarios** — an operator with root rewrites the local log *and* the local anchor file consistently: caught against the external anchor. The external anchor is unreachable: calls still run, and the report shows the exposure window growing. Each scenario mutation-tested, as in 6.7 | `internal/gate` | 7.8 |
@@ -84,7 +84,7 @@ fuzzers cover the parsers 7.8 extends.
 
    Recommendation: the object store, because it is the only one a single operator can
    deploy today without publishing their activity, with the anchor interface left open
-   for the other two. To be settled in ADR-0017 before 7.7.
+   for the other two. **Decided 2026-10-27: the object store** (ADR-0017).
 2. ~~**Semgrep.**~~ **Decided at 7.5: removed.** Its Go rules overlap `staticcheck` and
    `go vet`, and no rule specific to Warden was worth a second analyzer and a Python
    toolchain in the Go job. The design no longer names it.

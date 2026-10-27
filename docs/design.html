@@ -117,6 +117,7 @@
   <a href="#adr14">ADR-0014 Timestamps</a>
   <a href="#adr15">ADR-0015 Console</a>
   <a href="#adr16">ADR-0016 Key rotation</a>
+  <a href="#adr17">ADR-0017 Object store anchor</a>
 </nav>
 
 <main>
@@ -644,6 +645,13 @@ agent ◄──result (tagged)───┘</code></pre>
   <p><strong>Context.</strong> A chain was signed by one key for its whole life, so a key could neither be retired on a schedule nor withdrawn after a compromise without starting a new chain. And whoever holds a signing key can sign a rotation with it, so rotation alone cannot recover from compromise.</p>
   <p><strong>Decision.</strong> A <code>key_rotation</code> receipt is signed by the outgoing key <strong>and</strong> the incoming key is certified by the root, so taking a chain over needs both. A verifier starts from one trusted key and learns each later key from the log. A revocation is signed by the root, published in its own file beside the anchor, and names the last checkpoint believed good by size and head: receipts that key signed after it are refused, and everything the checkpoint covers still verifies.</p>
   <p><strong>Consequences.</strong> Rotation is routine and visible in the log, and an auditor's trust file stays at one key. A compromise still costs everything after the last good anchored checkpoint. Revoking needs the offline root, deliberately. The root signs with plain ML-DSA-65, so a revocation carries its own envelope rather than loosening the receipt one.</p>
+</div>
+
+<div class="adr" id="adr17">
+  <h3>ADR-0017 — A write-once object store as the external anchor <span class="pill g">Accepted</span></h3>
+  <p><strong>Context.</strong> The only anchor was a file on Warden's own host, so an operator with root could rewrite the log and its anchor together. S3 Object Lock in compliance mode makes an object version undeletable until its retention ends, but it locks versions, not names: a new version or a delete marker can hide a locked checkpoint from a plain read.</p>
+  <p><strong>Decision.</strong> Anchor to any S3-compatible store with Object Lock in compliance mode, alongside the file anchor. Each object holds exactly the signed checkpoint line, named by chain and size, written with an explicit lock and a conditional PUT, best effort and retried until it lands. <code>warden-verify</code> reads the store itself, lists every version and delete marker, and requires every version locked in compliance mode, one set of bytes per name, and a checkpoint time no later than the store's own. The S3 client and SigV4 are written in Warden, in <code>internal/anchor/s3</code>, rather than adding the AWS SDK.</p>
+  <p><strong>Consequences.</strong> Rewriting the log and its anchor together is caught. The operator can still stop anchoring, which the verifier reports as a growing gap, and can point an auditor at the wrong bucket, so the auditor must learn the bucket independently. The provider is trusted to honour the lock. Only static access keys are supported, and tests use an in-process fake store, so compatibility with real providers is checked separately.</p>
 </div>
 
 <div class="box warn">
