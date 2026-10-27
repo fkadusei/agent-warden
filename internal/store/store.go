@@ -60,14 +60,14 @@ type Store struct {
 	// key and kid are the signing key now in use. Rotate advances them, so they
 	// are guarded like the appender they sign through (ADR-0016).
 	mu  sync.Mutex
-	key *composite.PrivateKey
+	key composite.Signer
 	kid string
 	app *chain.Appender
 }
 
 // Open opens or creates the log at path for chainID, signing with key under kid.
 // Reopening an existing log resumes its chain.
-func Open(path string, key *composite.PrivateKey, kid, chainID string) (*Store, error) {
+func Open(path string, key composite.Signer, kid, chainID string) (*Store, error) {
 	if path == "" || strings.ContainsAny(path, "?#") {
 		return nil, fmt.Errorf("store: unsupported path %q", path)
 	}
@@ -232,15 +232,15 @@ func (s *Store) Append(ctx context.Context, r *receipt.Receipt) (*Appended, erro
 //
 // On any error nothing is written, the chain does not advance, and the outgoing
 // key keeps signing.
-func (s *Store) Rotate(ctx context.Context, r *receipt.Receipt, next *composite.PrivateKey) (*Appended, error) {
+func (s *Store) Rotate(ctx context.Context, r *receipt.Receipt, next composite.Signer) (*Appended, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if r.Type != receipt.TypeKeyRotation || r.Rotation == nil {
 		return nil, fmt.Errorf("store: Rotate needs a %s receipt", receipt.TypeKeyRotation)
 	}
-	if next == nil {
-		return nil, errors.New("store: rotation needs the incoming private key")
+	if next == nil || next.Public() == nil {
+		return nil, errors.New("store: rotation needs a signer for the incoming key")
 	}
 	if r.Rotation.From != s.kid {
 		return nil, fmt.Errorf("%w: rotation hands over from %q but this log signs with %q",

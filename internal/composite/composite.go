@@ -78,6 +78,20 @@ func (s Suite) MessageRepresentative(msg []byte) []byte {
 	return append(m, ph[:]...)
 }
 
+// Signer signs with a composite key wherever its private half lives: a key file
+// for development, or a hardware module or key-management service that never
+// releases it. Receipts, checkpoints, and approval statements are signed through
+// it, so nothing on that path needs the private key itself. *PrivateKey is the
+// file-based implementation.
+type Signer interface {
+	// Public returns the key's composite public key.
+	Public() *PublicKey
+	// Sign returns a composite signature over msg.
+	Sign(msg []byte) ([]byte, error)
+}
+
+var _ Signer = (*PrivateKey)(nil)
+
 // PrivateKey is a composite signing key.
 type PrivateKey struct {
 	suite Suite
@@ -120,8 +134,14 @@ func (k *PrivateKey) Seed() []byte {
 	return append(k.mldsa.Bytes(), k.ed.Seed()...)
 }
 
-// Public returns the matching composite public key.
-func (k *PrivateKey) Public() *PublicKey { return k.pub }
+// Public returns the matching composite public key, or nil for a nil key, so a
+// nil key passed as a Signer is refused rather than dereferenced.
+func (k *PrivateKey) Public() *PublicKey {
+	if k == nil {
+		return nil
+	}
+	return k.pub
+}
 
 // Sign produces a composite signature over msg.
 func (k *PrivateKey) Sign(msg []byte) ([]byte, error) {

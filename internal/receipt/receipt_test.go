@@ -282,3 +282,15 @@ func TestParseLineRejects(t *testing.T) {
 		})
 	}
 }
+
+// A nil key reaches Sign as a non-nil Signer holding a nil pointer. It must be
+// refused, not dereferenced.
+func TestSignRefusesANilKey(t *testing.T) {
+	var none *composite.PrivateKey
+	if _, err := Sign(none, "k1", decision(7)); err == nil {
+		t.Fatal("signed with a nil key")
+	}
+	if _, err := Sign(nil, "k1", decision(7)); err == nil {
+		t.Fatal("signed with no signer")
+	}
+}

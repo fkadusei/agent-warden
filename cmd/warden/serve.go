@@ -229,7 +229,7 @@ func loadApprovers(path string) (func(string) (*composite.PublicKey, error), err
 // them to the anchor file.
 type checkpointer struct {
 	st     *store.Store
-	key    *composite.PrivateKey
+	key    composite.Signer
 	kid    string
 	chain  string
 	anchor string
@@ -245,7 +245,7 @@ type checkpointer struct {
 	lastAt   time.Time
 }
 
-func newCheckpointer(st *store.Store, key *composite.PrivateKey, cfg *config.Config, out io.Writer) (*checkpointer, error) {
+func newCheckpointer(st *store.Store, key composite.Signer, cfg *config.Config, out io.Writer) (*checkpointer, error) {
 	c := &checkpointer{
 		st: st, key: key, kid: cfg.Kid, chain: cfg.ChainID, anchor: cfg.Path(cfg.Anchor),
 		policy: checkpoint.Policy{Every: cfg.CheckpointEvery, Interval: cfg.CheckpointInterval.Duration},

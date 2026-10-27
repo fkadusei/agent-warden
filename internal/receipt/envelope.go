@@ -49,7 +49,7 @@ func malformed(format string, a ...any) error {
 }
 
 // Sign validates r and signs it with k under key ID kid.
-func Sign(k *composite.PrivateKey, kid string, r *Receipt) (*Signed, error) {
+func Sign(k composite.Signer, kid string, r *Receipt) (*Signed, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
@@ -63,7 +63,11 @@ func Sign(k *composite.PrivateKey, kid string, r *Receipt) (*Signed, error) {
 // SignPayload signs canonical JSON payload bytes with k under key ID kid. The
 // payload must carry its own domain value so it cannot be confused with other
 // signed objects (threat W14).
-func SignPayload(k *composite.PrivateKey, kid string, payload []byte) (*Signed, error) {
+func SignPayload(k composite.Signer, kid string, payload []byte) (*Signed, error) {
+	// A nil pointer inside a Signer is not a nil interface, so check the key too.
+	if k == nil || k.Public() == nil {
+		return nil, errors.New("receipt: no signing key")
+	}
 	if name := k.Public().Suite().Name; name != Alg {
 		return nil, fmt.Errorf("receipt: key suite %s, want %s", name, Alg)
 	}

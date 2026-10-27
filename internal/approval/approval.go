@@ -111,7 +111,7 @@ func (s *Statement) Validate() error {
 }
 
 // Sign signs a statement with the approver's key. The kid is the approver.
-func Sign(k *composite.PrivateKey, s *Statement) (*receipt.Signed, error) {
+func Sign(k composite.Signer, s *Statement) (*receipt.Signed, error) {
 	if err := s.Validate(); err != nil {
 		return nil, err
 	}

@@ -84,7 +84,7 @@ func (c *Checkpoint) Validate() error {
 }
 
 // Sign validates c and signs it with k under key ID kid.
-func Sign(k *composite.PrivateKey, kid string, c *Checkpoint) (*receipt.Signed, error) {
+func Sign(k composite.Signer, kid string, c *Checkpoint) (*receipt.Signed, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}

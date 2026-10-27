@@ -57,7 +57,7 @@ func (p Params) GenesisPrev() (string, error) {
 // Appender assigns chain fields to receipts and signs them in order. It is not
 // safe for concurrent use.
 type Appender struct {
-	key     *composite.PrivateKey
+	key     composite.Signer
 	kid     string
 	chainID string
 	next    int64
@@ -66,7 +66,10 @@ type Appender struct {
 }
 
 // NewAppender starts a new chain signed by key under kid.
-func NewAppender(key *composite.PrivateKey, kid, chainID string) (*Appender, error) {
+func NewAppender(key composite.Signer, kid, chainID string) (*Appender, error) {
+	if key == nil || key.Public() == nil {
+		return nil, errors.New("chain: no signing key")
+	}
 	prev, err := NewParams(chainID, kid, key.Public()).GenesisPrev()
 	if err != nil {
 		return nil, err
@@ -91,7 +94,7 @@ func (a *Appender) State() State {
 
 // ResumeAppender continues an existing chain from st, for example after a
 // restart or to roll back an append whose line was never durably written.
-func ResumeAppender(key *composite.PrivateKey, kid, chainID string, st State) (*Appender, error) {
+func ResumeAppender(key composite.Signer, kid, chainID string, st State) (*Appender, error) {
 	a, err := NewAppender(key, kid, chainID)
 	if err != nil {
 		return nil, err
