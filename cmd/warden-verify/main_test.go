@@ -293,3 +293,15 @@ func TestUsageErrors(t *testing.T) {
 		t.Errorf("private key rejection not explained: %s", errOut)
 	}
 }
+
+// -version answers without needing a log, so a downloaded binary can say which
+// commit and toolchain built it.
+func TestVersion(t *testing.T) {
+	code, out, errOut := runCLI("-version")
+	if code != exitVerified || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if !strings.HasPrefix(out, "warden-verify ") || !strings.Contains(out, "go1.") {
+		t.Fatalf("version output %q", out)
+	}
+}

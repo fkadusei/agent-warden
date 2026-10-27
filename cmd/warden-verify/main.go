@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -84,6 +85,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	rootPath := fs.String("root", "", "Warden root certificate, so key rotations in the log can be followed (PEM)")
 	revocationsPath := fs.String("revocations", "", "published revocations, one per line (needs --root and --anchor)")
 	asJSON := fs.Bool("json", false, "print the result as JSON")
+	showVersion := fs.Bool("version", false, "print the commit and Go toolchain this binary was built from, and exit")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: warden-verify --log FILE --chain ID --keys FILE [--anchor FILE]"+
 			" [--root FILE [--revocations FILE]] [--tsa-tokens FILE --tsa-roots FILE] [--json]")
@@ -92,6 +94,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
+	}
+	if *showVersion {
+		fmt.Fprintln(stdout, version())
+		return exitVerified
 	}
 	if fs.NArg() > 0 || *logPath == "" || *chainID == "" || *keysPath == "" {
 		fs.Usage()
@@ -289,6 +295,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 		res.Warning = noCheckpointWarning
 	}
 	return emit(exitVerified)
+}
+
+// version names the commit and toolchain the binary was built from, read from
+// the build information Go records, so a downloaded binary can be rebuilt and
+// compared byte for byte. It adds nothing to the build that could differ.
+func version() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "warden-verify (no build information)"
+	}
+	rev, modified := "unknown commit", ""
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			if s.Value == "true" {
+				modified = ", with uncommitted changes"
+			}
+		}
+	}
+	return fmt.Sprintf("warden-verify %s%s, built with %s", rev, modified, info.GoVersion)
 }
 
 func printText(w io.Writer, r result) {
