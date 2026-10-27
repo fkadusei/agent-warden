@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -85,6 +88,10 @@ type Config struct {
 	// TSA, if set, timestamps each checkpoint with an RFC 3161 authority (ADR-0014).
 	TSA *TSA `json:"tsa,omitempty"`
 
+	// AnchorStore, if set, also anchors each checkpoint to a write-once object
+	// store (ADR-0017). Its credentials come from the environment, never this file.
+	AnchorStore *AnchorStore `json:"anchor_store,omitempty"`
+
 	Servers []Server `json:"servers"`
 
 	dir string
@@ -126,6 +133,9 @@ func Load(path string) (*Config, error) {
 		if c.TSA.Tokens == "" {
 			c.TSA.Tokens = "data/tokens.jsonl"
 		}
+	}
+	if c.AnchorStore != nil && c.AnchorStore.Timeout.Duration == 0 {
+		c.AnchorStore.Timeout.Duration = 10 * time.Second
 	}
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
@@ -175,6 +185,64 @@ func (c *Config) validate() error {
 		if c.TSA.Timeout.Duration < time.Second {
 			return errors.New("tsa.timeout must be at least 1s")
 		}
+	}
+	if c.AnchorStore != nil {
+		if err := c.AnchorStore.validate(); err != nil {
+			return fmt.Errorf("anchor_store: %w", err)
+		}
+	}
+	return nil
+}
+
+// AnchorStore is an S3-compatible bucket with Object Lock enabled. Checkpoints
+// are written to it locked in compliance mode for RetentionDays (ADR-0017).
+type AnchorStore struct {
+	// Endpoint is the store's base URL. Plain http is accepted only for a
+	// loopback address, such as a local test store.
+	Endpoint string `json:"endpoint"`
+	Region   string `json:"region"`
+	Bucket   string `json:"bucket"`
+	// Prefix goes before "<chain_id>/" in every object name.
+	Prefix string `json:"prefix,omitempty"`
+	// PathStyle puts the bucket in the URL path rather than the host name.
+	PathStyle     bool     `json:"path_style,omitempty"`
+	RetentionDays int      `json:"retention_days"`
+	Timeout       Duration `json:"timeout,omitempty"`
+}
+
+// Environment variables holding the anchor store's access key.
+const (
+	EnvAnchorAccessKeyID     = "WARDEN_ANCHOR_ACCESS_KEY_ID"
+	EnvAnchorSecretAccessKey = "WARDEN_ANCHOR_SECRET_ACCESS_KEY"
+)
+
+var bucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
+
+func (a *AnchorStore) validate() error {
+	u, err := url.Parse(a.Endpoint)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return errors.New("endpoint must be an http or https URL")
+	}
+	if u.Scheme == "http" {
+		ip := net.ParseIP(u.Hostname())
+		if u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return errors.New("endpoint must use https unless it is a loopback address")
+		}
+	}
+	if u.RawQuery != "" || u.User != nil {
+		return errors.New("endpoint must not carry a query or credentials")
+	}
+	if a.Region == "" {
+		return errors.New("region is required")
+	}
+	if !bucketName.MatchString(a.Bucket) {
+		return fmt.Errorf("bucket %q is not a valid bucket name", a.Bucket)
+	}
+	if a.RetentionDays < 1 || a.RetentionDays > 36500 {
+		return errors.New("retention_days must be between 1 and 36500")
+	}
+	if a.Timeout.Duration < time.Second {
+		return errors.New("timeout must be at least 1s")
 	}
 	return nil
 }

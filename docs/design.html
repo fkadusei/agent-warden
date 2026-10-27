@@ -389,7 +389,7 @@ agent ◄──result (tagged)───┘</code></pre>
 <div class="table-wrap"><table>
   <thead><tr><th>Area</th><th>Go</th><th>Python</th></tr></thead>
   <tbody>
-    <tr><td>Tests</td><td><code>go test</code>, the race detector on the concurrent packages, and 14 native fuzz targets over every parser of untrusted bytes (<code>scripts/fuzz.sh</code>, 30 s each on every push)</td><td>pytest</td></tr>
+    <tr><td>Tests</td><td><code>go test</code>, the race detector on the concurrent packages, and 15 native fuzz targets over every parser of untrusted bytes (<code>scripts/fuzz.sh</code>, 30 s each on every push)</td><td>pytest</td></tr>
     <tr><td>Lint and static analysis</td><td><code>go vet</code>, <code>staticcheck</code> v0.8.2, <code>govulncheck</code> v1.9.0</td><td>ruff, mypy (strict)</td></tr>
     <tr><td>CI</td><td>GitHub Actions pinned to commit SHAs; gitleaks over the whole history; the HTML docs checked against their Markdown</td><td>Actions pinned the same way; gitleaks covers the whole repository</td></tr>
     <tr><td>Release</td><td>Reproducible <code>warden-verify</code> binaries for macOS, Linux and Windows on amd64 and arm64, built on two operating systems and published only if they match byte for byte; none published yet</td><td>—</td></tr>

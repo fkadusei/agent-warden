@@ -113,3 +113,35 @@ func TestLoadRejects(t *testing.T) {
 		})
 	}
 }
+
+func TestAnchorStore(t *testing.T) {
+	with := func(section string) string {
+		return strings.Replace(good, `"taint": {"web": "web"}`, `"taint": {"web": "web"}, "anchor_store": `+section, 1)
+	}
+	c, err := Load(write(t, with(`{"endpoint": "https://s3.eu-west-1.amazonaws.com", "region": "eu-west-1",
+		"bucket": "warden-anchors", "prefix": "prod", "retention_days": 2555}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := c.AnchorStore; a.Bucket != "warden-anchors" || a.RetentionDays != 2555 || a.Timeout.Duration != 10*time.Second {
+		t.Fatalf("anchor_store: %+v", a)
+	}
+	if _, err := Load(write(t, with(`{"endpoint": "http://127.0.0.1:9000", "region": "local",
+		"bucket": "anchors", "path_style": true, "retention_days": 1}`))); err != nil {
+		t.Fatalf("a loopback http store: %v", err)
+	}
+	for name, section := range map[string]string{
+		"plain http off loopback": `{"endpoint": "http://s3.example.com", "region": "r", "bucket": "anchors", "retention_days": 1}`,
+		"no scheme":               `{"endpoint": "s3.example.com", "region": "r", "bucket": "anchors", "retention_days": 1}`,
+		"credentials in the URL":  `{"endpoint": "https://AKIA:secret@s3.example.com", "region": "r", "bucket": "anchors", "retention_days": 1}`,
+		"no region":               `{"endpoint": "https://s3.example.com", "bucket": "anchors", "retention_days": 1}`,
+		"bad bucket":              `{"endpoint": "https://s3.example.com", "region": "r", "bucket": "Anchors_1", "retention_days": 1}`,
+		"no retention":            `{"endpoint": "https://s3.example.com", "region": "r", "bucket": "anchors"}`,
+		"short timeout":           `{"endpoint": "https://s3.example.com", "region": "r", "bucket": "anchors", "retention_days": 1, "timeout": "10ms"}`,
+		"a secret in the file":    `{"endpoint": "https://s3.example.com", "region": "r", "bucket": "anchors", "retention_days": 1, "secret_access_key": "x"}`,
+	} {
+		if _, err := Load(write(t, with(section))); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

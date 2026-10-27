@@ -393,7 +393,7 @@ func run(out string, w io.Writer) (*result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := (checkpoint.FileAnchor{Path: res.Anchor}).Publish(signedCP); err != nil {
+	if err := (checkpoint.FileAnchor{Path: res.Anchor}).Publish(context.Background(), cp, signedCP); err != nil {
 		return nil, err
 	}
 

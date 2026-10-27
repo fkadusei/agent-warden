@@ -2,6 +2,7 @@ package checkpoint
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,9 +12,11 @@ import (
 	"github.com/fkadusei/agent-warden/internal/receipt"
 )
 
-// Anchor publishes signed checkpoints outside Warden's control.
+// Anchor publishes signed checkpoints outside Warden's control. s must be the
+// signed form of c: an anchor names or files what it stores by c, without
+// parsing a payload it has not verified.
 type Anchor interface {
-	Publish(s *receipt.Signed) error
+	Publish(ctx context.Context, c *Checkpoint, s *receipt.Signed) error
 }
 
 // FileAnchor appends signed checkpoints to a file, one line each, and syncs
@@ -26,8 +29,8 @@ type FileAnchor struct {
 	Path string
 }
 
-// Publish appends s to the anchor file.
-func (a FileAnchor) Publish(s *receipt.Signed) error {
+// Publish appends s to the anchor file. A local write takes no context.
+func (a FileAnchor) Publish(_ context.Context, _ *Checkpoint, s *receipt.Signed) error {
 	line, err := s.Line()
 	if err != nil {
 		return err

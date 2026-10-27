@@ -419,7 +419,7 @@ language-neutral.
 
 | Area | Go | Python |
 |---|---|---|
-| Tests | `go test`, the race detector on the concurrent packages, and 14 native fuzz targets over every parser of untrusted bytes (`scripts/fuzz.sh`, 30 s each on every push) | pytest |
+| Tests | `go test`, the race detector on the concurrent packages, and 15 native fuzz targets over every parser of untrusted bytes (`scripts/fuzz.sh`, 30 s each on every push) | pytest |
 | Lint and static analysis | `go vet`, `staticcheck` v0.8.2, `govulncheck` v1.9.0 | ruff, mypy (strict) |
 | CI | GitHub Actions pinned to commit SHAs; gitleaks over the whole history; the HTML docs checked against their Markdown | Actions pinned the same way; gitleaks covers the whole repository |
 | Release | Reproducible `warden-verify` binaries for macOS, Linux and Windows on amd64 and arm64, built on two operating systems and published only if they match byte for byte; none published yet | — |

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/mldsa"
 	"encoding/base64"
 	"encoding/json"
@@ -128,7 +129,7 @@ func newRotatedFixture(t *testing.T) rotatedFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (checkpoint.FileAnchor{Path: f.anchor}).Publish(s); err != nil {
+	if err := (checkpoint.FileAnchor{Path: f.anchor}).Publish(context.Background(), f.cp, s); err != nil {
 		t.Fatal(err)
 	}
 

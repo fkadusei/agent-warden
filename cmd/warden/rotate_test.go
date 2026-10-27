@@ -106,7 +106,7 @@ func anchorCheckpoint(t *testing.T, cfg *config.Config) *checkpoint.Checkpoint {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := (checkpoint.FileAnchor{Path: cfg.Path(cfg.Anchor)}).Publish(signed); err != nil {
+		if err := (checkpoint.FileAnchor{Path: cfg.Path(cfg.Anchor)}).Publish(context.Background(), cp, signed); err != nil {
 			t.Fatal(err)
 		}
 	})

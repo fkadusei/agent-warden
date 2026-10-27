@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -92,7 +93,7 @@ func newFixture(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (checkpoint.FileAnchor{Path: f.anchor}).Publish(s); err != nil {
+	if err := (checkpoint.FileAnchor{Path: f.anchor}).Publish(context.Background(), c, s); err != nil {
 		t.Fatal(err)
 	}
 

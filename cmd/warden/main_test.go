@@ -64,6 +64,8 @@ func TestEndToEnd(t *testing.T) {
 	defer tsaServer.Close()
 	cfg.TSA = &config.TSA{URL: tsaServer.URL, Timeout: config.Duration{Duration: 10 * time.Second},
 		Tokens: filepath.Join(dir, "data", "tokens.jsonl")}
+	// And anchor them to a write-once object store (ADR-0017).
+	_, storeClient := withAnchorStore(t, cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ready := make(chan addrs, 1)
@@ -152,6 +154,13 @@ func TestEndToEnd(t *testing.T) {
 	cps, err := checkpoint.ReadVerified(bytes.NewReader(anchorData), cfg.ChainID, keys.Resolver(trusted))
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Every file-anchored checkpoint is in the object store too, byte for byte.
+	for i, line := range bytes.Split(bytes.TrimSpace(anchorData), []byte("\n")) {
+		requireStored(t, storeClient, cfg, cps[i].Size, line)
+	}
+	if !strings.Contains(serveOut.String(), "anchor store:") || strings.Contains(serveOut.String(), "unreachable") {
+		t.Fatalf("serve output:\n%s", serveOut.String())
 	}
 	rep, err := chain.VerifyWithCheckpoints(bytes.NewReader(logData), cfg.ChainID, keys.Resolver(trusted), cps)
 	if err != nil {

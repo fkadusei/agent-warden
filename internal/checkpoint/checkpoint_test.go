@@ -2,6 +2,7 @@ package checkpoint
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -185,11 +186,12 @@ func TestFileAnchor(t *testing.T) {
 	ls := lines(6)
 	publish := func(n int, ts string) *receipt.Signed {
 		t.Helper()
-		s, err := Sign(k, kid, built(t, ls[:n], ts))
+		c := built(t, ls[:n], ts)
+		s, err := Sign(k, kid, c)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := a.Publish(s); err != nil {
+		if err := a.Publish(context.Background(), c, s); err != nil {
 			t.Fatal(err)
 		}
 		return s

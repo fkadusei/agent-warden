@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fkadusei/agent-warden/internal/anchor/s3"
 	"github.com/fkadusei/agent-warden/internal/approverapi"
 	"github.com/fkadusei/agent-warden/internal/checkpoint"
 	"github.com/fkadusei/agent-warden/internal/composite"
@@ -180,6 +181,10 @@ func serve(ctx context.Context, cfg *config.Config, out io.Writer, ready func(ad
 	if cfg.TSA != nil {
 		fmt.Fprintf(out, "  timestamps:               %s\n", cfg.TSA.URL)
 	}
+	if a := cfg.AnchorStore; a != nil {
+		fmt.Fprintf(out, "  anchor store:             %s, bucket %s, prefix %s (locked %d days)\n",
+			a.Endpoint, a.Bucket, s3.ChainPrefix(a.Prefix, cfg.ChainID), a.RetentionDays)
+	}
 	for id, reason := range exposed.Withheld {
 		fmt.Fprintf(out, "  withheld %s: %s\n", id, reason)
 	}
@@ -240,9 +245,44 @@ type checkpointer struct {
 	tokens string
 	out    io.Writer
 
+	// external, when set, is the write-once object store (ADR-0017). pending is
+	// the newest checkpoint it has not yet accepted; failures and nextTry pace
+	// the retries. None of this ever holds up a tool call.
+	external   checkpoint.Anchor
+	extTimeout time.Duration
+	pending    *signedCheckpoint
+	failures   int
+	nextTry    time.Time
+
 	mu       sync.Mutex
 	lastSize int64
 	lastAt   time.Time
+}
+
+type signedCheckpoint struct {
+	c *checkpoint.Checkpoint
+	s *receipt.Signed
+}
+
+// maxAnchorBackoff caps the wait between attempts to reach the anchor store.
+const maxAnchorBackoff = 5 * time.Minute
+
+// newStoreAnchor builds the object store anchor, reading its access key from
+// the environment.
+func newStoreAnchor(cfg *config.Config) (*s3.Anchor, error) {
+	a := cfg.AnchorStore
+	if err := s3.ValidName(a.Prefix, cfg.ChainID); err != nil {
+		return nil, fmt.Errorf("anchor_store: %w", err)
+	}
+	creds := s3.Credentials{AccessKeyID: os.Getenv(config.EnvAnchorAccessKeyID),
+		SecretAccessKey: os.Getenv(config.EnvAnchorSecretAccessKey)}
+	if creds.AccessKeyID == "" || creds.SecretAccessKey == "" {
+		return nil, fmt.Errorf("anchor_store: set %s and %s", config.EnvAnchorAccessKeyID, config.EnvAnchorSecretAccessKey)
+	}
+	client := &s3.Client{Endpoint: a.Endpoint, Region: a.Region, Bucket: a.Bucket, PathStyle: a.PathStyle,
+		Creds: creds, HTTP: &http.Client{Timeout: a.Timeout.Duration}}
+	return &s3.Anchor{Client: client, Prefix: a.Prefix, ChainID: cfg.ChainID,
+		Retention: time.Duration(a.RetentionDays) * 24 * time.Hour}, nil
 }
 
 func newCheckpointer(st *store.Store, key composite.Signer, cfg *config.Config, out io.Writer) (*checkpointer, error) {
@@ -254,6 +294,13 @@ func newCheckpointer(st *store.Store, key composite.Signer, cfg *config.Config, 
 	if cfg.TSA != nil {
 		c.stamp = &tsa.Client{URL: cfg.TSA.URL, HTTP: &http.Client{Timeout: cfg.TSA.Timeout.Duration}}
 		c.tokens = cfg.Path(cfg.TSA.Tokens)
+	}
+	if cfg.AnchorStore != nil {
+		a, err := newStoreAnchor(cfg)
+		if err != nil {
+			return nil, err
+		}
+		c.external, c.extTimeout = a, cfg.AnchorStore.Timeout.Duration
 	}
 	data, err := os.ReadFile(c.anchor)
 	if errors.Is(err, os.ErrNotExist) {
@@ -285,6 +332,17 @@ func newCheckpointer(st *store.Store, key composite.Signer, cfg *config.Config, 
 	}
 	if len(cps) > 0 {
 		c.lastSize = cps[len(cps)-1].Size
+		// The newest file-anchored checkpoint may never have reached the store,
+		// for example if Warden stopped while the store was down. Offering it
+		// again is safe: the store keeps one copy of identical bytes.
+		if c.external != nil {
+			lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
+			last, err := receipt.ParseLine(lines[len(lines)-1])
+			if err != nil {
+				return nil, fmt.Errorf("existing anchor: %w", err)
+			}
+			c.pending = &signedCheckpoint{cps[len(cps)-1], last}
+		}
 	}
 	return c, nil
 }
@@ -304,9 +362,18 @@ func (c *checkpointer) run(ctx context.Context, out io.Writer) {
 	}
 }
 
+// checkpoint signs and anchors a checkpoint when one is due (always, when
+// force is set and the log has grown), then offers the newest checkpoint to the
+// anchor store if it has not accepted it yet.
 func (c *checkpointer) checkpoint(ctx context.Context, force bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	err := c.checkpointLocked(ctx, force)
+	c.anchorExternally(ctx, time.Now(), force)
+	return err
+}
+
+func (c *checkpointer) checkpointLocked(ctx context.Context, force bool) error {
 	size := c.st.Next()
 	now := time.Now()
 	if size == 0 || size <= c.lastSize || (!force && !c.policy.Due(c.lastSize, size, c.lastAt, now)) {
@@ -328,10 +395,13 @@ func (c *checkpointer) checkpoint(ctx context.Context, force bool) error {
 	if err != nil {
 		return err
 	}
-	if err := (checkpoint.FileAnchor{Path: c.anchor}).Publish(signed); err != nil {
+	if err := (checkpoint.FileAnchor{Path: c.anchor}).Publish(ctx, cp, signed); err != nil {
 		return err
 	}
 	c.lastSize, c.lastAt = cp.Size, now
+	if c.external != nil {
+		c.pending = &signedCheckpoint{cp, signed}
+	}
 	if c.stamp != nil {
 		// The checkpoint is already anchored; a timestamp is extra evidence about
 		// when, so an authority that is down never stops Warden (ADR-0014).
@@ -340,6 +410,38 @@ func (c *checkpointer) checkpoint(ctx context.Context, force bool) error {
 		}
 	}
 	return nil
+}
+
+// anchorExternally offers the pending checkpoint to the anchor store. A failure
+// is reported and retried with growing waits; force ignores the wait, for the
+// final attempt at shutdown. A store holding a different checkpoint of the same
+// size is a fork or tampering: it is reported loudly and not retried, since a
+// later checkpoint is the only thing that can be anchored instead.
+func (c *checkpointer) anchorExternally(ctx context.Context, now time.Time, force bool) {
+	if c.external == nil || c.pending == nil || (!force && now.Before(c.nextTry)) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.extTimeout)
+	defer cancel()
+	p := c.pending
+	err := c.external.Publish(ctx, p.c, p.s)
+	switch {
+	case err == nil:
+		if c.failures > 0 {
+			fmt.Fprintf(c.out, "anchor store reached: checkpoint at size %d anchored after %d failed attempts\n", p.c.Size, c.failures)
+		}
+		c.pending, c.failures, c.nextTry = nil, 0, time.Time{}
+	case errors.Is(err, s3.ErrConflict):
+		fmt.Fprintf(c.out, "WARNING: the anchor store already holds a different checkpoint at size %d. "+
+			"The chain may have been forked or the store written by someone else: %v\n", p.c.Size, err)
+		c.pending, c.failures, c.nextTry = nil, 0, time.Time{}
+	default:
+		c.failures++
+		wait := min(time.Second<<min(c.failures, 9), maxAnchorBackoff)
+		c.nextTry = now.Add(wait)
+		fmt.Fprintf(c.out, "anchor store unreachable (attempt %d, next in %s; calls are not affected): %v\n",
+			c.failures, wait, err)
+	}
 }
 
 // timestamp asks the configured authority to stamp the exact bytes just anchored.
