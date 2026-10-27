@@ -148,7 +148,7 @@
     <tr><td><strong>Output inspector</strong></td><td>Tags results with a taint source; flags instruction-like content.</td><td>W1</td></tr>
     <tr><td><strong>Receipt log</strong></td><td>Write-ahead, signed, hash-chained receipts.</td><td>W8, W9, W13, W14</td></tr>
     <tr><td><strong>Checkpointer</strong></td><td>Signed checkpoints, sent to an external anchor.</td><td>W10, W11</td></tr>
-    <tr><td><strong>Signer</strong></td><td>Holds receipt signing keys behind an interface (file for dev; PKCS#11 / KMS for production).</td><td>W11, W12</td></tr>
+    <tr><td><strong>Signer</strong></td><td>Holds receipt signing keys behind an interface (<code>composite.Signer</code>). A 0600 key file is the only implementation; PKCS#11 / KMS is a later phase.</td><td>W11, W12</td></tr>
     <tr><td><strong><code>warden-verify</code></strong></td><td>Standalone offline verifier. Needs only public keys and checkpoints.</td><td>W9–W14</td></tr>
     <tr><td><strong>Demo agent + tools</strong></td><td>A small agent and synthetic tools (email, payments, repo, CRM) for the demo and benchmark.</td><td>—</td></tr>
   </tbody>
@@ -338,6 +338,7 @@ agent ◄──result (tagged)───┘</code></pre>
     <tr><td><strong>4</strong> <span class="pill g">done</span></td><td>Benchmark run with/without Warden; checkpoints + anchoring</td><td>Published: 47/62 attack calls succeeded without Warden, 0/62 with it, 20/20 benign both ways (<code>docs/benchmark.html</code>); RFC 3161 timestamps on anchored checkpoints (ADR-0014)</td></tr>
     <tr><td><strong>5</strong> <span class="pill g">done</span></td><td>README, demo video, write-up</td><td><code>docs/writeup.md</code>, a recorded demo (<code>docs/demo.gif</code>), the <code>warden console</code> (ADR-0015), CI on every push, and <code>docs/not-done.md</code></td></tr>
     <tr><td><strong>6</strong> <span class="pill g">done</span></td><td>Key rotation and revocation</td><td><code>key_rotation</code> receipts signed by the outgoing key and certified by the root (ADR-0016); <code>warden rotate-key</code> and <code>revoke-key</code>; <code>warden-verify --root --revocations</code>; gates K1–K6, each mutation-tested</td></tr>
+    <tr><td><strong>7</strong> <span class="pill">in progress</span></td><td>Claims made true; anchoring that leaves the host</td><td>Part A done: fuzzing, <code>staticcheck</code>, gitleaks and reproducible releases in CI, and a signer interface. Part B: a log and local anchor rewritten together are caught against an external anchor (<code>docs/phase7-plan.md</code>)</td></tr>
   </tbody>
 </table></div>
 
@@ -351,7 +352,7 @@ agent ◄──result (tagged)───┘</code></pre>
 </ol>
 
 <h2 id="stack">9. Tech stack (ADR-0006)</h2>
-<p><strong>Split by component:</strong> Go for everything on the trust path (receipts, verifier, gateway); Python for the demo agent, synthetic tools, and benchmark. The two sides meet only at MCP and at the receipt format (JSON + JCS + JWS), which is language-neutral.</p>
+<p><strong>Split by component:</strong> Go for everything on the trust path (receipts, verifier, gateway, and the synthetic tools); Python for the demo agent and benchmark. The two sides meet only at MCP and at the receipt format (JSON + JCS + JWS), which is language-neutral.</p>
 
 <h3>Go 1.27 — trust path</h3>
 <div class="table-wrap"><table>
@@ -361,14 +362,14 @@ agent ◄──result (tagged)───┘</code></pre>
     <tr><td>X.509 (task credentials, key certificates)</td><td>Standard library <code>crypto/x509</code></td><td>ML-DSA-65 certificates <span class="pill g">verified</span> locally</td></tr>
     <tr><td>Composite ML-DSA-65-Ed25519</td><td>Written in Warden</td><td>No library implements it; gated on draft test vectors</td></tr>
     <tr><td>JWS envelope</td><td>Minimal JWS JSON serialization, written in Warden</td><td>Mainstream JOSE libraries lack composite algorithms</td></tr>
-    <tr><td>JSON canonicalization (RFC 8785)</td><td><code>github.com/gowebpki/jcs</code> v1.0.1</td><td>To vet against the RFC 8785 test data</td></tr>
+    <tr><td>JSON canonicalization (RFC 8785)</td><td><code>github.com/gowebpki/jcs</code> v1.0.1, wrapped by <code>internal/canonical</code></td><td>Checked against RFC 8785's example, sorting rules and number samples; the wrapper adds UTF-8 rejection and a strict canonical-only check; fuzzed</td></tr>
     <tr><td>Merkle tree / checkpoints</td><td>Written in Warden, RFC 9162 hashing rules</td><td>Small, fully tested</td></tr>
-    <tr><td>RFC 3161 timestamps</td><td><code>github.com/digitorus/timestamp</code></td><td>No tagged release (pseudo-version only); to vet, or write the client</td></tr>
+    <tr><td>RFC 3161 timestamps</td><td><code>github.com/digitorus/timestamp</code> with <code>github.com/digitorus/pkcs7</code></td><td>Vetted and adopted in ADR-0014; no tagged release, so pinned by pseudo-version and checksum; used only behind <code>internal/tsa</code>; token parsing fuzzed</td></tr>
     <tr><td>Receipt store + commitment store</td><td>SQLite via <code>modernc.org/sqlite</code> v1.58.0</td><td>Pure Go, no cgo, so <code>warden-verify</code> stays a single static binary</td></tr>
     <tr><td>MCP</td><td><code>github.com/modelcontextprotocol/go-sdk</code> v1.8.0</td><td>Official SDK</td></tr>
     <tr><td>Policy engine</td><td>Cedar via <code>github.com/cedar-policy/cedar-go</code> v1.8.0</td><td>ADR-0007; two-action pattern for require_approval</td></tr>
     <tr><td>CLI</td><td>Standard library <code>flag</code></td><td>No dependency needed for <code>warden-verify</code></td></tr>
-    <tr><td>Signer</td><td>Interface: file keys for dev; PKCS#11 for hardware later</td><td>HSM support for ML-DSA varies by vendor</td></tr>
+    <tr><td>Signer</td><td><code>composite.Signer</code> (<code>Public</code>, <code>Sign</code>); a 0600 key file implements it</td><td>PKCS#11 / KMS later; HSM support for ML-DSA varies by vendor</td></tr>
   </tbody>
 </table></div>
 
@@ -376,9 +377,9 @@ agent ◄──result (tagged)───┘</code></pre>
 <div class="table-wrap"><table>
   <thead><tr><th>Layer</th><th>Choice</th></tr></thead>
   <tbody>
-    <tr><td>Demo agent</td><td>An MCP-capable agent framework; model still to be chosen</td></tr>
-    <tr><td>Synthetic tools</td><td>MCP servers built with the official MCP Python SDK</td></tr>
-    <tr><td>Benchmark harness</td><td>pytest scenarios; results as JSON, rendered into the README table</td></tr>
+    <tr><td>Demo agent</td><td><code>agent/</code>: a small model-agnostic loop on the official MCP Python SDK, with Anthropic, OpenAI-compatible and scripted adapters; the published benchmark used <code>qwen3:30b-a3b</code></td></tr>
+    <tr><td>Synthetic tools</td><td>Written in Go instead (<code>cmd/example-tools</code>), on the same MCP SDK as the gateway</td></tr>
+    <tr><td>Benchmark harness</td><td><code>warden-bench</code>: the corpus with and without Warden; results as JSON, rendered into <code>docs/benchmark.html</code> by <code>scripts/benchmark-report.py</code></td></tr>
     <tr><td>Environments</td><td>uv</td></tr>
   </tbody>
 </table></div>
@@ -387,10 +388,10 @@ agent ◄──result (tagged)───┘</code></pre>
 <div class="table-wrap"><table>
   <thead><tr><th>Area</th><th>Go</th><th>Python</th></tr></thead>
   <tbody>
-    <tr><td>Tests</td><td><code>go test</code>, native fuzzing (<code>go test -fuzz</code>) for tamper and parser tests</td><td>pytest</td></tr>
-    <tr><td>Lint and static analysis</td><td><code>go vet</code>, <code>staticcheck</code>, <code>govulncheck</code></td><td>ruff, mypy</td></tr>
-    <tr><td>CI</td><td>GitHub Actions pinned to commit SHAs, gitleaks, Semgrep</td><td>same</td></tr>
-    <tr><td>Release</td><td>Reproducible <code>warden-verify</code> binaries for macOS, Linux, Windows</td><td>—</td></tr>
+    <tr><td>Tests</td><td><code>go test</code>, the race detector on the concurrent packages, and 14 native fuzz targets over every parser of untrusted bytes (<code>scripts/fuzz.sh</code>, 30 s each on every push)</td><td>pytest</td></tr>
+    <tr><td>Lint and static analysis</td><td><code>go vet</code>, <code>staticcheck</code> v0.8.2, <code>govulncheck</code> v1.9.0</td><td>ruff, mypy (strict)</td></tr>
+    <tr><td>CI</td><td>GitHub Actions pinned to commit SHAs; gitleaks over the whole history; the HTML docs checked against their Markdown</td><td>Actions pinned the same way; gitleaks covers the whole repository</td></tr>
+    <tr><td>Release</td><td>Reproducible <code>warden-verify</code> binaries for macOS, Linux and Windows on amd64 and arm64, built on two operating systems and published only if they match byte for byte; none published yet</td><td>—</td></tr>
   </tbody>
 </table></div>
 
@@ -494,7 +495,7 @@ agent ◄──result (tagged)───┘</code></pre>
 
 <div class="threat"><h4><span class="id">W11</span>Signing key compromise</h4>
 <p><span class="lbl">Threat.</span> An attacker obtains a signing key and forges or rewrites history.</p>
-<p><span class="lbl">Mitigation.</span> Key lives only in Warden behind a signer interface supporting hardware custody. A chain is signed by one key at a time and hands over with a <code>key_rotation</code> receipt (ADR-0016): the outgoing key signs the handover <strong>and</strong> the root certifies the incoming key, so taking a chain over needs the old key <em>and</em> the root. A verifier walks forward from one trusted key and learns each later key from the log. Anchored checkpoints bound the damage. Revocation is signed by the root and effective from a named anchored checkpoint.</p>
+<p><span class="lbl">Mitigation.</span> Key lives only in Warden behind a signer interface; today a 0600 key file is the only implementation, so custody is as good as the host's filesystem. A chain is signed by one key at a time and hands over with a <code>key_rotation</code> receipt (ADR-0016): the outgoing key signs the handover <strong>and</strong> the root certifies the incoming key, so taking a chain over needs the old key <em>and</em> the root. A verifier walks forward from one trusted key and learns each later key from the log. Anchored checkpoints bound the damage. Revocation is signed by the root and effective from a named anchored checkpoint.</p>
 <p><span class="lbl">Test.</span> Gates K1–K5: a chain that rotates mid-session verifies from the key it began with; a key certified by anything other than the root is refused; a retired key cannot sign after handing over; receipts after a revocation's checkpoint are refused while the anchored history still verifies; a revocation naming an unanchored checkpoint is refused.</p>
 <div class="box risk"><span class="tag">Residual risk</span><p>Rotation shortens <em>future</em> exposure; it does not repair the past. Whoever holds a key can sign a rotation with it, so rotation alone cannot recover from a compromise, and a compromise still costs everything after the last good anchored checkpoint. Revoking a key needs the offline root — deliberately, because a revocation is the statement an attacker most wants to forge.</p></div></div>
 

@@ -11,9 +11,10 @@ verify offline.
 
 The agent is untrusted by design: it proposes actions, and Warden decides them.
 
-> **Status: all five phases complete.** The gateway runs as a real MCP server, both attack
-> gates pass, the with/without-Warden benchmark is published below, and the write-up, demo,
-> console, and CI are in place. What is *not* done is listed in
+> **Status: phases 0–6 complete, Phase 7 in progress.** The gateway runs as a real MCP
+> server, both attack gates pass, the with/without-Warden benchmark is published below, and
+> the write-up, demo, console, key rotation and revocation, and CI are in place. Phase 7
+> adds fuzzing and reproducible releases (done) and an anchor outside the host (next). What is *not* done is listed in
 > [`docs/not-done.md`](docs/not-done.md). See the phases in
 > [`docs/design.md`](docs/design.md#7-build-phases).
 

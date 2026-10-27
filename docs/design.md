@@ -30,7 +30,7 @@ that checkpoint.
 | **Output inspector** | Tags results with a taint source; flags instruction-like content. | W1 |
 | **Receipt log** | Write-ahead, signed, hash-chained receipts. | W8, W9, W13, W14 |
 | **Checkpointer** | Signed checkpoints, sent to an external anchor. | W10, W11 |
-| **Signer** | Holds receipt signing keys behind an interface (file for dev; PKCS#11 / KMS for production). | W11, W12 |
+| **Signer** | Holds receipt signing keys behind an interface (`composite.Signer`). A 0600 key file is the only implementation; PKCS#11 / KMS is a later phase. | W11, W12 |
 | **`warden-verify`** | Standalone offline verifier. Needs only public keys and checkpoints. | W9–W14 |
 | **Demo agent + tools** | A small agent and synthetic tools (email, payments, repo, CRM) for the demo and benchmark. | — |
 
@@ -362,6 +362,7 @@ with the model name and version, because they change with the model.
 | **4** ✅ | Benchmark run with/without Warden; checkpoints + anchoring | Published: 47/62 attack calls succeeded without Warden, 0/62 with it, 20/20 benign both ways (`docs/benchmark.html`); RFC 3161 timestamps on anchored checkpoints (ADR-0014) |
 | **5** ✅ | README, demo video, write-up | `docs/writeup.md`, a recorded demo (`docs/demo.gif`), the `warden console` (ADR-0015), CI on every push, and `docs/not-done.md` |
 | **6** ✅ | Key rotation and revocation | `key_rotation` receipts signed by the outgoing key and certified by the root (ADR-0016); `warden rotate-key` and `revoke-key`; `warden-verify --root --revocations`; gates K1–K6, each mutation-tested |
+| **7** in progress | Claims made true; anchoring that leaves the host | Part A done: fuzzing, `staticcheck`, gitleaks and reproducible releases in CI, and a signer interface. Part B: a log and local anchor rewritten together are caught against an external anchor (`docs/phase7-plan.md`) |
 
 ## 8. Open questions
 
@@ -384,7 +385,7 @@ with the model name and version, because they change with the model.
 ## 9. Tech stack (ADR-0006)
 
 **Split by component:** Go for everything on the trust path (receipts, verifier,
-gateway); Python for the demo agent, synthetic tools, and benchmark. The two sides
+gateway, and the synthetic tools); Python for the demo agent and benchmark. The two sides
 meet only at MCP and at the receipt format (JSON + JCS + JWS), which is
 language-neutral.
 
@@ -396,29 +397,29 @@ language-neutral.
 | X.509 (task credentials, key certificates) | Standard library `crypto/x509` | ML-DSA-65 certificates verified locally |
 | Composite ML-DSA-65-Ed25519 | Written in Warden | No library implements it; gated on draft test vectors |
 | JWS envelope | Minimal JWS JSON serialization, written in Warden | Mainstream JOSE libraries lack composite algorithms |
-| JSON canonicalization (RFC 8785) | `github.com/gowebpki/jcs` v1.0.1 | To vet against the RFC 8785 test data |
+| JSON canonicalization (RFC 8785) | `github.com/gowebpki/jcs` v1.0.1, wrapped by `internal/canonical` | Checked against RFC 8785's example, sorting rules and number samples; the wrapper adds UTF-8 rejection and a strict canonical-only check; fuzzed |
 | Merkle tree / checkpoints | Written in Warden, RFC 9162 hashing rules | Small, fully tested |
-| RFC 3161 timestamps | `github.com/digitorus/timestamp` | No tagged release (pseudo-version only); to vet, or write the client |
+| RFC 3161 timestamps | `github.com/digitorus/timestamp` with `github.com/digitorus/pkcs7` | Vetted and adopted in ADR-0014; no tagged release, so pinned by pseudo-version and checksum; used only behind `internal/tsa`; token parsing fuzzed |
 | Receipt store + commitment store | SQLite via `modernc.org/sqlite` v1.58.0 | Pure Go, no cgo, so `warden-verify` stays a single static binary |
 | MCP | `github.com/modelcontextprotocol/go-sdk` v1.8.0 | Official SDK |
 | Policy engine | Cedar via `github.com/cedar-policy/cedar-go` v1.8.0 | ADR-0007; two-action pattern for require_approval |
 | CLI | Standard library `flag` | No dependency needed for `warden-verify` |
-| Signer | Interface: file keys for dev; PKCS#11 for hardware later | HSM support for ML-DSA varies by vendor |
+| Signer | `composite.Signer` (`Public`, `Sign`); a 0600 key file implements it | PKCS#11 / KMS later; HSM support for ML-DSA varies by vendor |
 
 ### Python 3.13+ — demo and benchmark
 
 | Layer | Choice |
 |---|---|
-| Demo agent | An MCP-capable agent framework; model still to be chosen |
-| Synthetic tools | MCP servers built with the official MCP Python SDK |
-| Benchmark harness | pytest scenarios; results as JSON, rendered into the README table |
+| Demo agent | `agent/`: a small model-agnostic loop on the official MCP Python SDK, with Anthropic, OpenAI-compatible and scripted adapters; the published benchmark used `qwen3:30b-a3b` |
+| Synthetic tools | Written in Go instead (`cmd/example-tools`), on the same MCP SDK as the gateway |
+| Benchmark harness | `warden-bench`: the corpus with and without Warden; results as JSON, rendered into `docs/benchmark.html` by `scripts/benchmark-report.py` |
 | Environments | uv |
 
 ### Quality and supply chain
 
 | Area | Go | Python |
 |---|---|---|
-| Tests | `go test`, native fuzzing (`go test -fuzz`) for tamper and parser tests | pytest |
-| Lint and static analysis | `go vet`, `staticcheck`, `govulncheck` | ruff, mypy |
-| CI | GitHub Actions pinned to commit SHAs, gitleaks, Semgrep | same |
-| Release | Reproducible `warden-verify` binaries for macOS, Linux, Windows | — |
+| Tests | `go test`, the race detector on the concurrent packages, and 14 native fuzz targets over every parser of untrusted bytes (`scripts/fuzz.sh`, 30 s each on every push) | pytest |
+| Lint and static analysis | `go vet`, `staticcheck` v0.8.2, `govulncheck` v1.9.0 | ruff, mypy (strict) |
+| CI | GitHub Actions pinned to commit SHAs; gitleaks over the whole history; the HTML docs checked against their Markdown | Actions pinned the same way; gitleaks covers the whole repository |
+| Release | Reproducible `warden-verify` binaries for macOS, Linux and Windows on amd64 and arm64, built on two operating systems and published only if they match byte for byte; none published yet | — |

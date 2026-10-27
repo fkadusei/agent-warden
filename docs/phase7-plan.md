@@ -52,7 +52,7 @@ the design, not different between them.
 | 7.2 ✅ | **Static analysis and secret scanning in CI** — `staticcheck` v0.8.2 in the test job and gitleaks v8.30.1 over the whole history in a job of its own, both through `go run` at a pinned version so Go's checksum database verifies the code. `staticcheck` reported nothing; a planted bug proved it was analyzing. gitleaks found four hits for two values, both invented test credentials (`tok_gate_…` for the gate's fake payments server, `tok_live_…` for the tests that prove a credential is scrubbed before the agent sees it); `.gitleaks.toml` allows exactly those two values, and a different token-shaped value in the same kind of file is still caught. Semgrep is question 2 | `.github/workflows`, `.gitleaks.toml` | — |
 | 7.3 ✅ | **Reproducible releases** — `scripts/release-build.sh` builds `warden-verify` for macOS, Linux and Windows on amd64 and arm64 with `CGO_ENABLED=0 -trimpath` and writes `SHA256SUMS`. The release workflow builds independently on Linux and on macOS, which differ in both OS and CPU, then a third time on the publishing runner, and publishes only if all three match byte for byte; only checksum lists pass between jobs, so no artifact action is needed. The toolchain is pinned to Go 1.27.3 and named in every release. A run started by hand is a dry run; only a `v*` tag publishes. `warden-verify -version` names the commit and toolchain of any binary from Go's own build information. Locally, builds at two paths with separate caches were identical, and no file system path survives in the binaries | `scripts/release-build.sh`, `.github/workflows/release.yml`, `cmd/warden-verify` | 7.1, 7.2 |
 | 7.4 ✅ | **A signer interface** — `composite.Signer` (`Public`, `Sign`) is what receipts, checkpoints, approval statements, the chain appender, the store and `serve`'s checkpointer take; `*composite.PrivateKey` satisfies it, so no caller changed. Only `keyfile.WriteComposite`, which writes the seed, still needs the private key itself. The key ID stays outside the interface, unlike the plan's first draft: it is Warden's name for a key epoch, set in configuration and changed by rotation, not a property of where the key is held. Tests run a whole chain, a rotation and a checkpoint through a signer that never exposes its key, and show that a signer that cannot sign stops the call with nothing written. Two things surfaced and were fixed: a nil key passed as a `Signer` is a non-nil interface, so the old `next == nil` check let it through to a panic (the full suite caught it); and nothing tested a write that fails after a rotation, whose recovery must not bring the retired key back, which now has a test. Gates, corpus and the demo log are unchanged | `internal/composite`, `internal/receipt`, `internal/checkpoint`, `internal/chain`, `internal/store`, `internal/approval`, `cmd/warden` | — |
-| 7.5 | **Docs for Part A** — the tech-stack table, the signer and CI claims, and `docs/not-done.md` (whose "a signer interface, but only one signer" is itself inaccurate) | docs | 7.1–7.4 |
+| 7.5 ✅ | **Docs for Part A** — design §9 rewritten from the code: the five stale rows now say what was built (JCS checked against RFC 8785 and wrapped; the timestamp modules vetted in ADR-0014; the agent's adapters and benchmark model; synthetic tools written in Go; `warden-bench` and its report), and the quality rows name versions, the fuzz budget, and that no release is published yet. Semgrep is removed (question 2). The Signer component, W11 and design §7 (a Phase 7 row) no longer claim hardware custody. `govulncheck` was the one CI tool installed at `@latest`; it is now pinned to v1.9.0. `docs/not-done.md` replaces the inaccurate signer entry with hardware-backed keys and the local-only anchor, and adds unsigned releases and the short fuzz budget. README status updated | `docs/design.md`, `docs/design.html`, `docs/threat-model.md`, `docs/not-done.md`, `README.md`, `.github/workflows/go.yml` | 7.1–7.4 |
 
 ### Part B — anchoring that leaves the host
 
@@ -85,11 +85,17 @@ fuzzers cover the parsers 7.8 extends.
    Recommendation: the object store, because it is the only one a single operator can
    deploy today without publishing their activity, with the anchor interface left open
    for the other two. To be settled in ADR-0017 before 7.7.
-2. **Semgrep.** The design names it, but for this codebase its Go rules overlap
-   `staticcheck` and `go vet`. Add it only with a rule worth having; otherwise remove the
-   claim in 7.5.
+2. ~~**Semgrep.**~~ **Decided at 7.5: removed.** Its Go rules overlap `staticcheck` and
+   `go vet`, and no rule specific to Warden was worth a second analyzer and a Python
+   toolchain in the Go job. The design no longer names it.
 3. **Fuzzing budget.** A short run on every push catches regressions; a long nightly run
    finds new bugs. Proposed: 30 seconds per target on push, and a nightly job running
    longer, with any finding opened as a failing run.
 4. **Hardware-backed keys.** Deferred to a later phase on purpose: 7.4 builds the seam,
-   and ML-DSA support in HSMs and KMSs still varies by vendor. To be confirmed.
+   and ML-DSA support in HSMs and KMSs still varies by vendor. Checked on 2026-10-27: a
+   local SoftHSM 2.7.0 (Homebrew, on OpenSSL 3) implements `CKM_EDDSA` but no ML-DSA
+   mechanism, so it can hold the Ed25519 half of a composite key and not the ML-DSA half.
+   It is still useful for testing a PKCS#11 signer's plumbing — sessions, login, key
+   lookup, an unreachable token failing closed — but a signer that keeps half the key in
+   a file is not hardware custody and must not be described as such. A PKCS#11 signer
+   also means cgo in `warden` (not `warden-verify`), which needs an ADR. To be confirmed.

@@ -9,9 +9,16 @@ not a rough edge: none of it is hidden by the tests or the benchmark.
 per-approval device confirmation, and no rotation story for approver keys — receipt
 signing keys rotate and can be revoked (ADR-0016); these cannot.
 
-**A signer interface, but only one signer.** Receipt keys live in a file at mode 0600.
-The design calls for a signer interface with PKCS#11 or KMS behind it, and nothing here
-implements one, so custody is as good as the host's filesystem.
+**Hardware-backed receipt keys.** Everything that signs receipts, checkpoints and
+approval statements takes a `composite.Signer`, and tests drive a whole chain through a
+signer that never exposes its key. But the only implementation is a key file at mode
+0600, so custody is as good as the host's filesystem. A PKCS#11 or KMS signer has to
+hold both halves of the composite key, and ML-DSA support in HSMs still varies by
+vendor: SoftHSM 2.7.0, for one, signs Ed25519 but not ML-DSA.
+
+**An anchor outside the host.** Checkpoints go to `checkpoint.FileAnchor`, a file on the
+same machine. An operator with root can rewrite the log and that file together, and
+nothing here would notice. Phase 7 Part B adds an external anchor.
 
 ## Deliberately shallow
 
@@ -70,5 +77,12 @@ permit-everything policy and requiring every policy-dependent attack to succeed.
   an approver key in memory while it runs with one (ADR-0015).
 - `warden-verify` links two unreleased modules (`digitorus/timestamp`, `digitorus/pkcs7`),
   pinned by checksum, used only behind `internal/tsa` and only when TSA roots are passed.
+- Releases are built reproducibly and compared across two operating systems, but none has
+  been published, and the binaries are not signed and carry no build provenance (no
+  Sigstore signature, no SLSA attestation). The checksums are only as trustworthy as the
+  page they are read from.
+- Fuzzing runs 30 seconds per target on each push. Targets that verify a signature on
+  every input get a few thousand executions in that time, which catches regressions but
+  is too little to find much new; there is no longer nightly run.
 - The scenario corpus is 41 scenarios; the design targets 30–40 attacks and 10–15 benign,
   which it meets, but breadth is not depth: each attack is one shape of one idea.

@@ -175,7 +175,9 @@ a stated, tunable parameter.
 **Threat.** An attacker obtains a receipt signing key and forges or rewrites
 history.
 **Mitigation.** The key lives only in Warden (never the agent), behind a signer
-interface that supports hardware-backed custody. A chain is signed by one key at a
+interface (`composite.Signer`). Today a 0600 key file is the only implementation, so
+custody is as good as the host's filesystem; the interface is where a hardware-backed
+signer will go. A chain is signed by one key at a
 time and hands over with a `key_rotation` receipt (ADR-0016): the outgoing key signs
 the handover **and** the root certifies the incoming key, so taking a chain over
 needs the old key *and* the root — strictly more than either alone. A verifier walks
