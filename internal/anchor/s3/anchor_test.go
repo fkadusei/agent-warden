@@ -67,6 +67,11 @@ func (f *fixture) checkpointOf(t *testing.T, n int, tag string) (*checkpoint.Che
 // overwrite, a delete, a delete of a specific version.
 func (f *fixture) operator(t *testing.T, method, key, query string, body []byte) int {
 	t.Helper()
+	return f.operatorWith(t, method, key, query, body, nil)
+}
+
+func (f *fixture) operatorWith(t *testing.T, method, key, query string, body []byte, header map[string]string) int {
+	t.Helper()
 	u := f.srv.URL + "/anchors/" + key
 	if query != "" {
 		u += "?" + query
@@ -74,6 +79,9 @@ func (f *fixture) operator(t *testing.T, method, key, query string, body []byte)
 	req, err := http.NewRequest(method, u, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
+	}
+	for k, v := range header {
+		req.Header.Set(k, v)
 	}
 	h := checkpointHash(body)
 	s3.Sign(req, h, creds, "eu-west-1", time.Now())

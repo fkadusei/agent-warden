@@ -29,6 +29,7 @@ type fixture struct {
 	anchor string
 	keys   string
 	lines  [][]byte
+	key    *composite.PrivateKey
 }
 
 func (f fixture) path(name string) string { return filepath.Join(f.dir, name) }
@@ -56,6 +57,7 @@ func newFixture(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.key = k
 	a, err := chain.NewAppender(k, kid, chainID)
 	if err != nil {
 		t.Fatal(err)

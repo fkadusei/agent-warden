@@ -218,8 +218,11 @@ const (
 
 var bucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 
-func (a *AnchorStore) validate() error {
-	u, err := url.Parse(a.Endpoint)
+// CheckStoreEndpoint accepts an anchor store's base URL: https, or plain http
+// only for a loopback address such as a local test store, with no query and no
+// credentials in it. warden-verify applies the same rule.
+func CheckStoreEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
 	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
 		return errors.New("endpoint must be an http or https URL")
 	}
@@ -231,6 +234,13 @@ func (a *AnchorStore) validate() error {
 	}
 	if u.RawQuery != "" || u.User != nil {
 		return errors.New("endpoint must not carry a query or credentials")
+	}
+	return nil
+}
+
+func (a *AnchorStore) validate() error {
+	if err := CheckStoreEndpoint(a.Endpoint); err != nil {
+		return err
 	}
 	if a.Region == "" {
 		return errors.New("region is required")

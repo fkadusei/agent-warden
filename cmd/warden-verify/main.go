@@ -1,5 +1,7 @@
-// Command warden-verify checks a Warden receipt log offline, using only trusted
-// public keys and, optionally, anchored checkpoints.
+// Command warden-verify checks a Warden receipt log, using only trusted public
+// keys and, optionally, anchored checkpoints: from a file, from a write-once
+// object store it reads itself (ADR-0017), or both. With a file alone it runs
+// offline.
 //
 // Exit status: 0 if the log verified, 1 if verification failed, 2 for usage or
 // file errors.
@@ -20,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fkadusei/agent-warden/internal/anchor/s3"
 	"github.com/fkadusei/agent-warden/internal/chain"
 	"github.com/fkadusei/agent-warden/internal/checkpoint"
 	"github.com/fkadusei/agent-warden/internal/keyfile"
@@ -33,6 +36,9 @@ const (
 	exitFailed   = 1
 	exitUsage    = 2
 )
+
+const noStoreCheckpointWarning = "WARNING: the anchor store holds no checkpoints for this chain. The log was checked " +
+	"only against the anchor file, which whoever runs Warden can rewrite together with the log."
 
 const noCheckpointWarning = "WARNING: no anchored checkpoints were checked. Without them, deleting the newest " +
 	"receipts or rewriting the whole log with the signing key cannot be detected."
@@ -60,6 +66,8 @@ type result struct {
 	Rotations []chain.KeyHandover `json:"rotations,omitempty"`
 	// Revocations are the ones enforced against this log.
 	Revocations []revokedView `json:"revocations,omitempty"`
+	// Store is what the write-once object store holds for this chain (ADR-0017).
+	Store *storeView `json:"store,omitempty"`
 	// Set when verification failed.
 	Stage   string         `json:"stage,omitempty"`
 	Failure *chain.Failure `json:"failure,omitempty"`
@@ -83,11 +91,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	tokensPath := fs.String("tsa-tokens", "", "RFC 3161 timestamps over the anchored checkpoints")
 	tsaRootsPath := fs.String("tsa-roots", "", "certificates trusted to act as timestamp authorities (PEM)")
 	rootPath := fs.String("root", "", "Warden root certificate, so key rotations in the log can be followed (PEM)")
-	revocationsPath := fs.String("revocations", "", "published revocations, one per line (needs --root and --anchor)")
+	revocationsPath := fs.String("revocations", "", "published revocations, one per line (needs --root and an anchor)")
+	sf := addStoreFlags(fs)
 	asJSON := fs.Bool("json", false, "print the result as JSON")
 	showVersion := fs.Bool("version", false, "print the commit and Go toolchain this binary was built from, and exit")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: warden-verify --log FILE --chain ID --keys FILE [--anchor FILE]"+
+			" [--store-endpoint URL --store-region R --store-bucket B [--store-prefix P]]"+
 			" [--root FILE [--revocations FILE]] [--tsa-tokens FILE --tsa-roots FILE] [--json]")
 		fmt.Fprintln(stderr, "\nExit status: 0 verified, 1 verification failed, 2 usage or file error.")
 		fs.PrintDefaults()
@@ -119,8 +129,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	resolve := keys.Resolver(trusted)
 
-	if *revocationsPath != "" && (*rootPath == "" || *anchorPath == "") {
-		return usageErr("--revocations needs --root, which signs revocations, and --anchor, " +
+	var store *s3.Client
+	if sf.set() {
+		if store, err = sf.client(); err != nil {
+			return usageErr("%v", err)
+		}
+	}
+	haveAnchor := *anchorPath != "" || store != nil
+
+	if *revocationsPath != "" && (*rootPath == "" || !haveAnchor) {
+		return usageErr("--revocations needs --root, which signs revocations, and an anchor (--anchor or the store), " +
 			"because a revocation is effective from an anchored checkpoint")
 	}
 
@@ -166,7 +184,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// The anchor is read before the log, but a rotated chain's later checkpoints
 	// are signed by keys that only the log can introduce. So read the log once
 	// first to learn them; accepting the same rotation again is a no-op.
-	if rotating != nil && *anchorPath != "" {
+	if rotating != nil && haveAnchor {
 		lf, err := os.Open(*logPath)
 		if err != nil {
 			return usageErr("%v", err)
@@ -184,18 +202,54 @@ func run(args []string, stdout, stderr io.Writer) int {
 		resolve = rotating.Resolve
 	}
 
+	// anchored is every anchored line, labelled, for checking timestamps;
+	// fileLines are the file anchor's lines by checkpoint size.
+	type labelled struct {
+		label string
+		line  []byte
+	}
+	var anchored []labelled
+	fileLines := map[int64][]byte{}
 	var cps []*checkpoint.Checkpoint
 	if *anchorPath != "" {
-		f, err := os.Open(*anchorPath)
+		data, err := os.ReadFile(*anchorPath)
 		if err != nil {
 			return usageErr("%v", err)
 		}
-		cps, err = checkpoint.ReadVerified(f, *chainID, resolve)
-		f.Close()
+		cps, err = checkpoint.ReadVerified(bytes.NewReader(data), *chainID, resolve)
 		if err != nil {
 			res.Stage, res.Error = "anchor", err.Error()
 			return emit(exitFailed)
 		}
+		var lines [][]byte
+		for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+			if len(bytes.TrimSpace(line)) > 0 {
+				lines = append(lines, line)
+			}
+		}
+		for i, line := range lines {
+			anchored = append(anchored, labelled{fmt.Sprintf("anchor line %d", i+1), line})
+			if i < len(cps) {
+				fileLines[cps[i].Size] = line
+			}
+		}
+	}
+	if store != nil {
+		storeCps, view, err := readStore(sf, store, *chainID, resolve, fileLines)
+		if errors.Is(err, errStoreUnreadable) {
+			return usageErr("%v", err)
+		}
+		if err != nil {
+			res.Stage, res.Error = "anchor store", err.Error()
+			return emit(exitFailed)
+		}
+		res.Store = view
+		for _, a := range view.Checkpoints {
+			if _, inFile := fileLines[a.Size]; !inFile {
+				anchored = append(anchored, labelled{a.Object, a.Line})
+			}
+		}
+		cps = merge(cps, storeCps)
 	}
 	res.Checkpoints = len(cps)
 
@@ -225,8 +279,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *tokensPath != "" || *tsaRootsPath != "" {
-		if *tokensPath == "" || *tsaRootsPath == "" || *anchorPath == "" {
-			return usageErr("--tsa-tokens and --tsa-roots go together, and need --anchor")
+		if *tokensPath == "" || *tsaRootsPath == "" || !haveAnchor {
+			return usageErr("--tsa-tokens and --tsa-roots go together, and need an anchor (--anchor or the store)")
 		}
 		roots, err := tsa.LoadRoots(*tsaRootsPath)
 		if err != nil {
@@ -240,20 +294,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return usageErr("%v", err)
 		}
-		anchorData, err := os.ReadFile(*anchorPath)
-		if err != nil {
-			return usageErr("%v", err)
-		}
 		var earliest time.Time
-		for n, line := range bytes.Split(bytes.TrimSpace(anchorData), []byte("\n")) {
-			if len(bytes.TrimSpace(line)) == 0 {
-				continue
-			}
+		for _, a := range anchored {
 			// A token must cover the anchored bytes exactly; anything else fails.
-			for _, token := range tokens[tsa.Digest(line)] {
-				when, err := tsa.Verify(token, line, roots)
+			for _, token := range tokens[tsa.Digest(a.line)] {
+				when, err := tsa.Verify(token, a.line, roots)
 				if err != nil {
-					res.Stage, res.Error = "timestamp", fmt.Sprintf("anchor line %d: %v", n+1, err)
+					res.Stage, res.Error = "timestamp", fmt.Sprintf("%s: %v", a.label, err)
 					return emit(exitFailed)
 				}
 				res.Timestamps++
@@ -291,8 +338,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 	res.Checkpointed = rep.Checkpointed
 	res.Unanchored = rep.Unanchored
 	res.OpenDecisions = rep.OpenDecisions
-	if len(cps) == 0 {
+	if res.Store != nil {
+		res.Store.Unanchored = int64(rep.Receipts)
+		if n := len(res.Store.Checkpoints); n > 0 {
+			res.Store.Unanchored -= res.Store.Checkpoints[n-1].Size
+		}
+	}
+	switch {
+	case len(cps) == 0:
 		res.Warning = noCheckpointWarning
+	case res.Store != nil && len(res.Store.Checkpoints) == 0:
+		res.Warning = noStoreCheckpointWarning
 	}
 	return emit(exitVerified)
 }
@@ -346,6 +402,25 @@ func printText(w io.Writer, r result) {
 		}
 	} else {
 		row("checkpointed", "none")
+	}
+	if st := r.Store; st != nil {
+		if n := len(st.Checkpoints); n > 0 {
+			last := st.Checkpoints[n-1]
+			row("anchor store", fmt.Sprintf("%d checkpoints in %s", n, st.Location))
+			row("store newest", fmt.Sprintf("covers %d receipts, stored %s, locked until %s", last.Size,
+				last.StoredAt.UTC().Format(time.RFC3339), last.RetainUntil.UTC().Format(time.RFC3339)))
+			row("not in store", fmt.Sprintf("%d receipts after the store's newest checkpoint", st.Unanchored))
+		} else {
+			row("anchor store", "no checkpoints for this chain in "+st.Location)
+		}
+		if st.Notices != nil {
+			for _, name := range st.Notices.DeleteMarkers {
+				row("store notice", "delete marker on "+name+" (the locked checkpoint still counts)")
+			}
+			for _, name := range st.Notices.Duplicates {
+				row("store notice", "identical copies of "+name)
+			}
+		}
 	}
 	for _, h := range r.Rotations {
 		detail := fmt.Sprintf("%s to %s at seq %d", h.From, h.To, h.Seq)
