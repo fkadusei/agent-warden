@@ -1,0 +1,17 @@
+# Secret scanning for this repository (CI runs gitleaks over the whole history).
+#
+# The default rules apply. Two values are allowed, each exactly: they are invented
+# test credentials, made to look like real tokens because the tests exist to prove
+# Warden never lets a credential reach the agent or a receipt. Neither is, or ever
+# was, a credential for any service. Anything else that looks like a secret,
+# including a different value in the same files, still fails the scan.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic tool credentials used by the tests and the gate"
+regexTarget = "secret"
+regexes = [
+  '''^tok_gate_4f7c2a9e1b$''', # internal/gate/env.go: the fake payments server's token
+  '''^tok_live_9f2c4d1e7a$''', # broker, gateway and mcpgw tests: scrubbed before the agent sees it
+]
