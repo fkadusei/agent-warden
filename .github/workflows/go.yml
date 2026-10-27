@@ -57,6 +57,30 @@ jobs:
           echo "running: $verify"
           eval "$verify"
 
+  # Every parser that reads bytes an attacker can control is fuzzed briefly on each
+  # push (scripts/fuzz.sh). The seed inputs also run under the test job's
+  # `go test`; this job looks for new ones.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Fuzz every untrusted-input parser
+        run: FUZZTIME=30s scripts/fuzz.sh
+
+      # A failing input is written under testdata/fuzz; print it, so the run's log
+      # is enough to reproduce the finding.
+      - name: Show failing inputs
+        if: failure()
+        run: |
+          find . -path '*/testdata/fuzz/*' -type f | while read -r f; do
+            echo "== $f"; cat "$f"; echo
+          done
+
   vulncheck:
     runs-on: ubuntu-latest
     steps:
